@@ -1,6 +1,6 @@
 # Multi-Agent + Intent Recognition Demo
 
-一个轻量级的多 Agent 调用与意图识别示例项目，参考 [agenthub-py](https://github.com/agenthub-py) 的核心设计，简化为纯 Python 实现。
+一个轻量级的多 Agent 调用与意图识别示例项目，简化为纯 Python 实现。
 
 支持三种多 Agent 协作模式：
 - **意图识别 + 条件路由**：LLM 识别意图，规则路由到固定 Agent
