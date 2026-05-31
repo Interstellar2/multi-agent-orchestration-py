@@ -27,10 +27,10 @@ pip install -r requirements.txt
 
 ```bash
 OPENAI_API_KEY=sk-xxx
-DASHSCOPE_API_KEY=sk-yyy
+DASHSCOPE_API_KEY=sk-yyy          # 百炼 / 阿里云
 DEEPSEEK_API_KEY=sk-zzz
-KIMI_API_KEY=sk-aaa
-OPENROUTER_API_KEY=sk-bbb
+KIMI_API_KEY=sk-aaa               # Moonshot
+OPENROUTER_API_KEY=sk-bbb         # OpenRouter 统一网关
 ```
 
 程序启动时会**自动加载** `.env` 中的环境变量。
@@ -166,52 +166,39 @@ class LoggingAgent(Agent):
 
 ---
 
+## 内置 LLM Provider
+
+| Provider | 说明 | 环境变量 | 已注册模型 |
+|----------|------|----------|-----------|
+| OpenAI | 官方 OpenAI 模型 | `OPENAI_API_KEY` | gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo |
+| Bailian (百炼) | 阿里云百炼平台 | `DASHSCOPE_API_KEY` | qwen-max, qwen-plus, qwen-turbo, qwen3.5-plus, qwen3.5-flash |
+| DeepSeek | DeepSeek 官方 | `DEEPSEEK_API_KEY` | deepseek-chat, deepseek-reasoner |
+| **Kimi** | Moonshot 月之暗面 | `KIMI_API_KEY` | kimi-k2.5, kimi-k2, kimi-k1.5 |
+| **OpenRouter** | 统一 API 网关 | `OPENROUTER_API_KEY` | anthropic/claude-3.5-sonnet, openai/gpt-4o, openai/gpt-4o-mini, deepseek/deepseek-chat |
+
+Kimi 和 OpenRouter 已内置，在 `.env` 中填入对应 Key 即可直接使用。
+
+---
+
 ## 扩展新 LLM Provider
 
-以接入 **Kimi** 和 **OpenRouter** 为例（项目已内置）：
+以接入 **Anthropic Claude** 为例，只需三步：
 
 ### 1. 添加 provider 文件
 
-新建 `llm/providers/kimi.py`：
+新建 `llm/providers/anthropic.py`：
 
 ```python
-from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from llm.config import config
 
-_cfg = config.providers.get("kimi", {})
+_cfg = config.providers.get("anthropic", {})
 _api_key = _cfg.api_key if _cfg else ""
-_base_url = _cfg.base_url if _cfg else "https://api.moonshot.cn/v1"
 
-kimi_k2_5 = ChatOpenAI(
-    model="kimi-k2.5",
+claude_3_5_sonnet = ChatAnthropic(
+    model="claude-3-5-sonnet-20240620",
     api_key=_api_key,
-    base_url=_base_url,
     temperature=0.7,
-)
-```
-
-新建 `llm/providers/openrouter.py`：
-
-```python
-from langchain_openai import ChatOpenAI
-from llm.config import config
-
-_cfg = config.providers.get("openrouter", {})
-_api_key = _cfg.api_key if _cfg else ""
-_base_url = _cfg.base_url if _cfg else "https://openrouter.ai/api/v1"
-
-# OpenRouter 推荐传入应用标识头（可选）
-_default_headers = {}
-if _cfg and getattr(_cfg, "app_name", None):
-    _default_headers["X-Title"] = _cfg.app_name
-    _default_headers["HTTP-Referer"] = getattr(_cfg, "app_url", "")
-
-openrouter_claude_3_5_sonnet = ChatOpenAI(
-    model="anthropic/claude-3.5-sonnet",
-    api_key=_api_key,
-    base_url=_base_url,
-    temperature=0.7,
-    default_headers=_default_headers,
 )
 ```
 
@@ -222,17 +209,15 @@ openrouter_claude_3_5_sonnet = ChatOpenAI(
 ```python
 class ModelType(str, Enum):
     # ... 已有模型
-    KIMI_K2_5 = "kimi-kimi-k2.5"
-    OR_CLAUDE_3_5_SONNET = "openrouter-claude-3.5-sonnet"
+    CLAUDE_3_5_SONNET = "anthropic-claude-3-5-sonnet"
 ```
 
-编辑 `llm/factory.py`，在 `__init__` 中注册：
+编辑 `llm/factory.py`，在 `__init__` 中导入并注册：
 
 ```python
-from llm.providers import kimi, openrouter
+from llm.providers import anthropic
 
-self._models[ModelType.KIMI_K2_5] = kimi.kimi_k2_5
-self._models[ModelType.OR_CLAUDE_3_5_SONNET] = openrouter.openrouter_claude_3_5_sonnet
+self._models[ModelType.CLAUDE_3_5_SONNET] = anthropic.claude_3_5_sonnet
 ```
 
 ### 3. 配置 API Key
@@ -240,21 +225,18 @@ self._models[ModelType.OR_CLAUDE_3_5_SONNET] = openrouter.openrouter_claude_3_5_
 在 `.env` 中添加：
 
 ```bash
-KIMI_API_KEY=sk-xxx
-OPENROUTER_API_KEY=sk-or-xxx
+ANTHROPIC_API_KEY=sk-ant-xxx
 ```
 
 或在 `config.yaml` 中添加：
 
 ```yaml
 providers:
-  kimi:
-    api_key: ${KIMI_API_KEY}
-    base_url: https://api.moonshot.cn/v1
-  openrouter:
-    api_key: ${OPENROUTER_API_KEY}
-    base_url: https://openrouter.ai/api/v1
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
 ```
+
+> **OpenRouter 特殊配置**：支持可选的 `app_name` 和 `app_url` 字段，用于在 OpenRouter 排行榜中标识你的应用。在 `config.yaml` 中配置即可自动传入 `X-Title` 和 `HTTP-Referer` 请求头。
 
 ---
 
