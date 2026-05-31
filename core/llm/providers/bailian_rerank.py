@@ -27,7 +27,7 @@ class BailianReranker:
         from llm.providers.bailian_rerank import BailianReranker
         reranker = BailianReranker()
         scores = reranker.rerank(query="解雇赔偿", documents=[doc1, doc2, ...])
-        # 返回按分数排序的 (document, score) 列表
+        # 返回按分数排序的 (document_index, score) 列表
     """
 
     def __init__(self, api_key: str = None, model: str = _DEFAULT_MODEL, top_n: int = 5):
@@ -43,11 +43,11 @@ class BailianReranker:
 
     def rerank(
         self, query: str, documents: List[str]
-    ) -> List[Tuple[str, float]]:
+    ) -> List[Tuple[int, float]]:
         """
         对文档列表进行重排序。
 
-        返回: [(document_text, score), ...] 按 score 降序排列
+        返回: [(document_index, score), ...] 按 score 降序排列
         """
         if not documents:
             return []
@@ -70,7 +70,7 @@ class BailianReranker:
         results = data["output"]["results"]
         # results 格式: [{"index": 0, "relevance_score": 0.95}, ...]
         sorted_results = sorted(results, key=lambda x: x["relevance_score"], reverse=True)
-        return [(documents[r["index"]], r["relevance_score"]) for r in sorted_results]
+        return [(r["index"], r["relevance_score"]) for r in sorted_results]
 
 
 # 全局单例

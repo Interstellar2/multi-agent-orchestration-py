@@ -25,6 +25,7 @@ class LocalReranker:
 
         reranker = LocalReranker(top_n=5, embedder=get_ollama_embedding())
         scores = reranker.rerank(query="解雇赔偿", documents=[doc1, doc2, ...])
+        # 返回 [(document_index, score), ...]
     """
 
     def __init__(self, top_n: int = 5, embedder=None):
@@ -45,11 +46,11 @@ class LocalReranker:
 
     def rerank(
         self, query: str, documents: List[str]
-    ) -> List[Tuple[str, float]]:
+    ) -> List[Tuple[int, float]]:
         """
         对文档列表进行重排序。
 
-        返回: [(document_text, score), ...] 按 score 降序排列
+        返回: [(document_index, score), ...] 按 score 降序排列
         """
         if not documents:
             return []
@@ -58,8 +59,8 @@ class LocalReranker:
         doc_vecs = self.embedder.embed_documents(documents)
 
         scored = [
-            (doc, self._cosine_similarity(query_vec, vec))
-            for doc, vec in zip(documents, doc_vecs)
+            (i, self._cosine_similarity(query_vec, vec))
+            for i, vec in enumerate(doc_vecs)
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[: self.top_n]

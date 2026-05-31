@@ -285,12 +285,10 @@ def search(
         reranked = reranker.rerank(query, texts)
         # 按 rerank 结果重新排序
         reranked_docs = []
-        for text, score in reranked:
-            for d in docs:
-                if d.page_content == text:
-                    d.metadata["rerank_score"] = score
-                    reranked_docs.append(d)
-                    break
+        for idx, score in reranked:
+            d = docs[idx]
+            d.metadata["rerank_score"] = score
+            reranked_docs.append(d)
         docs = reranked_docs
 
     return docs[:rerank_top_n]
