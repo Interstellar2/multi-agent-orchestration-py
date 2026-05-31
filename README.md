@@ -85,7 +85,7 @@ python main.py
 ## 快速开始（通用 Demo）
 
 ```bash
-python main.py
+python -m core.demo
 ```
 
 输出包含 6 个演示场景：
@@ -166,7 +166,14 @@ python -m hk_law.rag.ingest --all
 ### 4. 运行法律问答
 
 ```bash
-python -m hk_law.main
+# 交互式问答
+python main.py --mode interactive
+
+# 或运行 Demo 测试用例
+python main.py --mode demo
+
+# 也可以直接调用模块
+python -m hk_law.main --mode interactive
 ```
 
 或使用 API：
@@ -364,12 +371,16 @@ providers:
 │   │       ├── bailian_rerank.py     # 百炼 Rerank (gte-rerank)
 │   │       ├── deepseek.py     # DeepSeek 模型实例
 │   │       ├── kimi.py         # Kimi 模型实例
-│   │       └── openrouter.py   # OpenRouter 模型实例
+│   │       ├── openrouter.py   # OpenRouter 模型实例
+│   │       ├── ollama_embedding.py   # Ollama 本地 Embedding
+│   │       └── local_rerank.py       # 本地余弦相似度 Rerank
 │   ├── routing/
 │   │   ├── intent.py           # 意图识别
 │   │   ├── condition.py        # 条件路由
 │   │   ├── supervisor.py       # Supervisor 循环版
 │   │   └── supervisor_graph.py # Supervisor LangGraph 版
+│   ├── utils/
+│   │   └── logger.py           # 日志工具
 │   └── workflows.py            # 三种工作流组合
 └── hk_law/                     # 香港法律业务应用
     ├── main.py                 # 法律系统入口
@@ -382,8 +393,10 @@ providers:
     │   └── property.py         # 物业法 Agent
     ├── rag/
     │   ├── engine.py           # ES + 百炼 Embedding/Rerank RAG 引擎
-    │   └── ingest.py           # 文档索引 CLI 工具
-    └── documents/              # 法律文档目录（需自行下载）
+    │   ├── ingest.py           # 文档索引 CLI 工具
+    │   └── download.py         # 法律文档下载工具
+    └── documents/              # 法律文档目录
+        └── SOURCES.md          # 文档来源说明
         ├── criminal/
         ├── civil/
         ├── company/
