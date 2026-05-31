@@ -22,6 +22,5 @@ providers:
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
     base_url: https://openrouter.ai/api/v1
-    # 可选：OpenRouter 应用标识（用于统计和排名）
     app_name: ${OPENROUTER_APP_NAME}
     app_url: ${OPENROUTER_APP_URL}
