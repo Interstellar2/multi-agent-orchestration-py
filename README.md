@@ -345,7 +345,7 @@ python main.py capital_market --mode research --server-url http://127.0.0.1:1888
 
 ## 资本市场研究助理
 
-**资本市场研究助理**（`CapitalMarketAgent`）是本项目 MCP 协议集成的核心业务 Agent，专门负责查询港交所金融数据。它继承自 `MCPAgent`，默认连接 `hk-finance-mcp`（或本项目 Mock 版 MCP Server）。
+**资本市场研究助理**（`CapitalMarketAgent`）是本项目 MCP 协议集成的核心业务 Agent，专门负责查询港交所金融数据。它继承自统一 Agent 基座并组合 `MCPClientProvider`，默认连接 `hk-finance-mcp`（或本项目 Mock 版 MCP Server）。
 
 ### 设计定位
 
@@ -420,8 +420,8 @@ result = await capital_market_team_workflow(
 通过 `ModelType` 枚举选择 LLM，API Key 自动从配置读取：
 
 ```python
-from llm.model_type import ModelType
-from agents.specialized import CodeAgent
+from core.llm.model_type import ModelType
+from core.agents.specialized import CodeAgent
 
 agent = CodeAgent(model_type=ModelType.QWEN_MAX)
 output = await agent.run("写个 Python 快排")
@@ -430,9 +430,9 @@ output = await agent.run("写个 Python 快排")
 ### 2. 混合模型（每个 Agent 不同 LLM）
 
 ```python
-from llm.model_type import ModelType
-from agents.specialized import CodeAgent, ChatAgent
-from workflows import team_supervisor_graph_workflow
+from core.llm.model_type import ModelType
+from core.agents.specialized import CodeAgent, ChatAgent
+from core.workflows import team_supervisor_graph_workflow
 
 code_agent = CodeAgent(model_type=ModelType.QWEN_MAX)
 chat_agent = ChatAgent(model_type=ModelType.GPT_4O_MINI)
@@ -444,10 +444,10 @@ result = await team_supervisor_graph_workflow(
 )
 ```
 
-### 3. 五种工作流模式
+### 3. 七种工作流模式
 
 ```python
-from workflows import (
+from core.workflows import (
     intent_condition_workflow,           # 模式一：意图识别 + 条件路由
     team_supervisor_workflow,            # 模式二：Supervisor Python 版
     team_supervisor_graph_workflow,      # 模式三：Supervisor LangGraph 版
@@ -492,8 +492,8 @@ result = await capital_market_team_workflow(
 继承 `Agent` 基类，设置 `name` 和 `system_prompt` 即可：
 
 ```python
-from agents.base import Agent
-from llm.model_type import ModelType
+from core.agents.base import Agent
+from core.llm.model_type import ModelType
 
 class TranslationAgent(Agent):
     name = "translate"
@@ -622,50 +622,25 @@ providers:
 │       └── demo_server.py      # FastMCP Demo Server（stdio / sse）
 └── domains/                    # 业务域聚合（与 core/ 对齐）
     ├── hk_law/                 # 香港法律业务应用
-    │   ├── main.py             # 法律系统入口
+    │   ├── main.py             # 法律系统入口（HKLawSystem）
     │   ├── agents/
-    │   │   ├── base.py         # 法律 Agent 基类（继承 core.agents）
-    │   │   ├── criminal.py     # 刑事法 Agent
-    │   │   ├── civil.py        # 民事/合约法 Agent
-    │   │   ├── company.py      # 公司法 Agent
-    │   │   ├── employment.py   # 雇佣法 Agent
-    │   │   └── property.py     # 物业法 Agent
+    │   │   ├── __init__.py     # 法域配置表 + 工厂（生成 5 个法域 Agent）
+    │   │   └── base.py         # 法律 Agent 基类（RAG 检索 + LLM 生成）
     │   ├── rag/
     │   │   ├── engine.py       # ES + 百炼 Embedding/Rerank RAG 引擎
     │   │   ├── ingest.py       # 文档索引 CLI 工具
     │   │   └── download.py     # 法律文档下载工具
     │   └── documents/          # 法律文档目录
-    │       └── SOURCES.md      # 文档来源说明
     │       ├── criminal/
     │       ├── civil/
     │       ├── company/
     │       ├── employment/
     │       └── property/
     └── capital_market/         # 香港资本市场业务应用
+        ├── main.py             # 业务入口（独立/团队两种工作流 + demo）
         └── agents/
-            ├── base.py         # CapitalMarketAgent（Agent + MCPClientProvider）
-            └── __init__.py     # 注册表导出
-        ├── base.py             # CapitalMarketAgent（Agent + MCPClientProvider）
-        └── __init__.py         # 注册表导出
-    ├── main.py                 # 法律系统入口
-    ├── agents/
-    │   ├── base.py             # 法律 Agent 基类（继承 core.agents）
-    │   ├── criminal.py         # 刑事法 Agent
-    │   ├── civil.py            # 民事/合约法 Agent
-    │   ├── company.py          # 公司法 Agent
-    │   ├── employment.py       # 雇佣法 Agent
-    │   └── property.py         # 物业法 Agent
-    ├── rag/
-    │   ├── engine.py           # ES + 百炼 Embedding/Rerank RAG 引擎
-    │   ├── ingest.py           # 文档索引 CLI 工具
-    │   └── download.py         # 法律文档下载工具
-    └── documents/              # 法律文档目录
-        └── SOURCES.md          # 文档来源说明
-        ├── criminal/
-        ├── civil/
-        ├── company/
-        ├── employment/
-        └── property/
+            ├── __init__.py     # 导出 CapitalMarketAgent
+            └── base.py         # CapitalMarketAgent（Agent + MCPClientProvider）
 ```
 
 ---
