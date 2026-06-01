@@ -16,7 +16,12 @@ import asyncio
 import sys
 
 from core.utils.logger import get_logger
-from core.workflows import mcp_react_workflow, mcp_supervisor_workflow
+from core.workflows import (
+    capital_market_research_workflow,
+    capital_market_team_workflow,
+    mcp_react_workflow,
+    mcp_supervisor_workflow,
+)
 
 logger = get_logger(__name__)
 
@@ -43,6 +48,64 @@ async def interactive_mode():
         result = await system.ask(query, mode="intent")
         logger.info(f"\n[法域] {result['domain']} (置信度: {result['confidence']:.2f})")
         logger.info(f"[回答]\n{result['output']}\n")
+
+
+async def capital_market_demo(
+    mode: str = "research",
+    server_url: str = None,
+):
+    """
+    资本市场研究助理演示入口。
+
+    参数:
+        mode: "research" 单独跑 CapitalMarketAgent，
+              "team" 跑 Supervisor + CapitalMarketAgent + ChatAgent
+        server_url: hk-finance-mcp SSE 地址
+    """
+    logger.info("=" * 60)
+    logger.info("香港资本市场研究助理演示")
+    logger.info("=" * 60)
+
+    if not server_url:
+        server_url = "http://127.0.0.1:1888/mcp/sse"
+        logger.info(f"使用默认 MCP Server: {server_url}")
+        logger.info(
+            "请确保 hk-finance-mcp 已启动: "
+            "cd /Users/hanniandong/python_project/hk-finance-mcp && python main.py"
+        )
+
+    test_queries = [
+        "查询小米集团的股票代码和上市信息",
+        "最近一年有哪些公司在港交所回购股票？",
+        "中金的保荐项目有哪些？",
+        "查询'腾讯'的官方公司全称",
+    ]
+
+    for query in test_queries:
+        logger.info(f"\n[测试问题] {query}")
+        try:
+            if mode == "research":
+                result = await capital_market_research_workflow(
+                    query=query,
+                    server_url=server_url,
+                )
+                output = result.get("output", "N/A")
+            else:
+                result = await capital_market_team_workflow(
+                    query=query,
+                    server_url=server_url,
+                )
+                output = result.get("final_output", "N/A")
+            logger.info(f"[结果]\n{output}\n")
+        except Exception as e:
+            logger.error(f"[错误] {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    logger.info("=" * 60)
+    logger.info("演示完成")
+    logger.info("=" * 60)
 
 
 async def mcp_demo(mode: str = "react", transport: str = "stdio", server_url: str = None):
@@ -133,10 +196,28 @@ async def main():
         help="SSE 模式下 MCP Server 地址，例如 http://127.0.0.1:18080/sse",
     )
 
+    # 资本市场研究助理子命令
+    cm_parser = subparsers.add_parser(
+        "capital_market", help="香港资本市场研究助理（连接 hk-finance-mcp）"
+    )
+    cm_parser.add_argument(
+        "--mode",
+        choices=["research", "team"],
+        default="research",
+        help="运行模式: research (单独 CapitalMarketAgent) 或 team (Supervisor 协作)",
+    )
+    cm_parser.add_argument(
+        "--server-url",
+        default=None,
+        help="hk-finance-mcp SSE 地址，默认 http://127.0.0.1:1888/mcp/sse",
+    )
+
     args = parser.parse_args()
 
     if args.command == "mcp":
         await mcp_demo(mode=args.mode, transport=args.transport, server_url=args.server_url)
+    elif args.command == "capital_market":
+        await capital_market_demo(mode=args.mode, server_url=args.server_url)
     elif args.command == "hk_law":
         if args.mode == "interactive":
             await interactive_mode()
