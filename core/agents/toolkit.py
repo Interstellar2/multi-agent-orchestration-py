@@ -10,6 +10,7 @@ ToolProvider 接口与 MCP 实现
         tools = await provider.discover()
         result = await provider.invoke("query_by_stock_code", {"code": "00700"})
 """
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -159,3 +160,81 @@ class MCPClientProvider(ToolProvider):
         except Exception as exc:
             logger.error(f"[MCPClientProvider] 工具调用失败 | {exc}")
             raise
+
+    async def fetch_all(
+        self,
+        tool_name: str,
+        arguments: dict,
+        *,
+        page_size: int = 50,
+        max_pages: int = 20,
+        max_records: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """
+        自动分页拉取工具全部数据，直到 has_more 为 False 或触及上限。
+
+        Args:
+            tool_name: 工具名
+            arguments: 基础参数（不要传 offset/limit，方法内部自动管理）
+            page_size: 每页条数
+            max_pages: 最大翻页次数（防止死循环）
+            max_records: 最大累计条数（防止 Token 爆炸）
+
+        Returns:
+            合并后的 data 列表
+        """
+        if self._session is None:
+            raise RuntimeError("MCPClientProvider 未进入异步上下文，请先 async with")
+
+        all_data: List[Dict[str, Any]] = []
+        offset = 0
+        limit = page_size
+        pages_fetched = 0
+
+        base_args = {k: v for k, v in arguments.items() if k not in ("offset", "limit")}
+
+        while pages_fetched < max_pages and len(all_data) < max_records:
+            page_args = {**base_args, "offset": offset, "limit": limit}
+            logger.info(
+                f"[MCPClientProvider] fetch_all 第 {pages_fetched + 1} 页 | "
+                f"{tool_name}(offset={offset}, limit={limit})"
+            )
+
+            result_text = await self.invoke(tool_name, page_args)
+
+            try:
+                result = json.loads(result_text)
+            except json.JSONDecodeError:
+                logger.warning(
+                    f"[MCPClientProvider] fetch_all 返回非 JSON，终止翻页 | {result_text[:200]}"
+                )
+                break
+
+            if isinstance(result, dict) and "error" in result:
+                logger.error(
+                    f"[MCPClientProvider] fetch_all 工具返回错误: {result['error']}"
+                )
+                break
+
+            page_data = result.get("data", []) if isinstance(result, dict) else []
+            all_data.extend(page_data)
+            pages_fetched += 1
+
+            has_more = result.get("has_more", False) if isinstance(result, dict) else False
+            total_count = result.get("total_count")
+
+            if not has_more:
+                logger.info(
+                    f"[MCPClientProvider] fetch_all 完成 | 共 {pages_fetched} 页, "
+                    f"{len(all_data)} 条 (total_count={total_count})"
+                )
+                break
+
+            offset += limit
+        else:
+            logger.warning(
+                f"[MCPClientProvider] fetch_all 触发上限保护终止 | "
+                f"pages={pages_fetched}, records={len(all_data)}"
+            )
+
+        return all_data

@@ -411,9 +411,11 @@ def query_by_stock_code(
     stock_code: str = Field(description="The stock code to query, e.g. 00700, 01810"),
     table_name: str = Field(description="The name of the table to query"),
     limit: int = Field(default=50, description="Maximum number of records to return"),
+    offset: int = Field(default=0, description="Number of records to skip for pagination"),
 ) -> Dict:
     """
     Query records by stock code from the specified table.
+    Supports pagination via offset/limit.
     """
     if not _validate_table_name(table_name):
         return {
@@ -422,15 +424,21 @@ def query_by_stock_code(
         }
 
     table_data = _MOCK_DATA.get(table_name, [])
-    results = [
+    all_matches = [
         row for row in table_data
         if row.get("stock_code") == stock_code
-    ][:limit]
+    ]
+    total_count = len(all_matches)
+    results = all_matches[offset : offset + limit]
 
     return {
         "table_name": table_name,
         "stock_code": stock_code,
         "count": len(results),
+        "total_count": total_count,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(results) < total_count,
         "data": results,
     }
 
@@ -444,9 +452,11 @@ def query_by_sponsor(
         description="The table to query (default: hk_ipo_info)",
     ),
     limit: int = Field(default=50, description="Maximum records to return"),
+    offset: int = Field(default=0, description="Number of records to skip for pagination"),
 ) -> Dict:
     """
     Query IPO records by sponsor name.
+    Supports pagination via offset/limit.
     """
     if not _validate_table_name(table_name):
         return {
@@ -456,15 +466,21 @@ def query_by_sponsor(
 
     table_data = _MOCK_DATA.get(table_name, [])
     # 支持部分匹配（演示简化版，生产环境用更复杂的模糊匹配）
-    results = [
+    all_matches = [
         row for row in table_data
         if sponsor_name in row.get("sponsor", "")
-    ][:limit]
+    ]
+    total_count = len(all_matches)
+    results = all_matches[offset : offset + limit]
 
     return {
         "table_name": table_name,
         "sponsor": sponsor_name,
         "count": len(results),
+        "total_count": total_count,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(results) < total_count,
         "data": results,
     }
 
@@ -477,9 +493,11 @@ def filter_by_date(
     end_date: str = Field(description="End date in YYYY-MM-DD format"),
     start_date: Optional[str] = Field(default=None, description="Start date in YYYY-MM-DD format"),
     limit: int = Field(default=50, description="Maximum records to return"),
+    offset: int = Field(default=0, description="Number of records to skip for pagination"),
 ) -> Dict:
     """
     Filter table records by a date range on the specified date column.
+    Supports pagination via offset/limit.
     """
     if not _validate_table_name(table_name):
         return {
@@ -497,7 +515,7 @@ def filter_by_date(
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
     start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
 
-    results = []
+    all_matches = []
     for row in table_data:
         row_date_str = row.get(date_column)
         if not row_date_str:
@@ -511,9 +529,10 @@ def filter_by_date(
             continue
         if start_dt and row_dt < start_dt:
             continue
-        results.append(row)
-        if len(results) >= limit:
-            break
+        all_matches.append(row)
+
+    total_count = len(all_matches)
+    results = all_matches[offset : offset + limit]
 
     return {
         "table_name": table_name,
@@ -521,6 +540,10 @@ def filter_by_date(
         "start_date": start_date,
         "end_date": end_date,
         "count": len(results),
+        "total_count": total_count,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(results) < total_count,
         "data": results,
     }
 
@@ -533,9 +556,11 @@ def filter_by_numeric_value(
     operator: str = Field(description="Comparison operator: =, >, <, >=, <=, !="),
     value: Optional[float] = Field(default=None, description="The numeric value to compare"),
     limit: int = Field(default=50, description="Maximum records to return"),
+    offset: int = Field(default=0, description="Number of records to skip for pagination"),
 ) -> Dict:
     """
     Filter table records by a numeric condition.
+    Supports pagination via offset/limit.
     """
     if not _validate_table_name(table_name):
         return {
@@ -553,7 +578,6 @@ def filter_by_numeric_value(
         return {"error": "Value cannot be None for numeric comparison."}
 
     table_data = _MOCK_DATA.get(table_name, [])
-    results = []
 
     ops = {
         "=": lambda a, b: a == b,
@@ -565,6 +589,7 @@ def filter_by_numeric_value(
     }
     op_func = ops[operator]
 
+    all_matches = []
     for row in table_data:
         row_val = row.get(column_name)
         if row_val is None:
@@ -575,9 +600,10 @@ def filter_by_numeric_value(
             continue
 
         if op_func(row_num, value):
-            results.append(row)
-            if len(results) >= limit:
-                break
+            all_matches.append(row)
+
+    total_count = len(all_matches)
+    results = all_matches[offset : offset + limit]
 
     return {
         "table_name": table_name,
@@ -585,6 +611,10 @@ def filter_by_numeric_value(
         "operator": operator,
         "value": value,
         "count": len(results),
+        "total_count": total_count,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(results) < total_count,
         "data": results,
     }
 

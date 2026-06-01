@@ -23,7 +23,7 @@ MCP Agent —— 支持通过 Model Context Protocol 调用外部工具的子 Ag
     agent = MCPAgent(server_cmd=["python", "-m", "mcp_bridge.server.demo_server"])
     result = await agent.run("北京今天天气怎么样？")
 """
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -61,9 +61,43 @@ class MCPAgent(Agent):
         if not server_url and not server_cmd:
             raise ValueError("MCPAgent 需要 server_url 或 server_cmd 之一来连接 MCP Server")
 
-        provider = MCPClientProvider(server_url=server_url, server_cmd=server_cmd)
-        super().__init__(model_type=model_type, llm=llm, tools=[provider])
+        self._provider = MCPClientProvider(server_url=server_url, server_cmd=server_cmd)
+        super().__init__(model_type=model_type, llm=llm, tools=[self._provider])
 
         # 保留旧版属性以便外部访问（如需要调试）
         self.server_url = server_url
         self.server_cmd = server_cmd
+
+    async def fetch_all(
+        self,
+        tool_name: str,
+        arguments: dict,
+        *,
+        page_size: int = 50,
+        max_pages: int = 20,
+        max_records: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """
+        自动分页拉取指定工具的全部数据。
+
+        内部会独立建立 MCP 连接，执行翻页，完成后关闭连接。
+        适合在 run() 之外直接获取全量数据做进一步分析。
+
+        Args:
+            tool_name: 工具名
+            arguments: 基础参数（不要传 offset/limit）
+            page_size: 每页条数
+            max_pages: 最大翻页次数
+            max_records: 最大累计条数
+
+        Returns:
+            合并后的 data 列表
+        """
+        async with self._provider:
+            return await self._provider.fetch_all(
+                tool_name=tool_name,
+                arguments=arguments,
+                page_size=page_size,
+                max_pages=max_pages,
+                max_records=max_records,
+            )
