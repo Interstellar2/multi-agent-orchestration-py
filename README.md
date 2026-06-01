@@ -2,17 +2,19 @@
 
 一个轻量级的多 Agent 协作与 MCP 协议集成示例项目，纯 Python 实现。
 
-支持 **五种协作模式**：
+支持 **七种协作模式**：
 - **意图识别 + 条件路由**：LLM 识别意图，规则路由到固定 Agent
 - **Team Supervisor（循环版）**：LLM 动态决策调用哪个 Agent，串行执行，上下文传递
 - **Team Supervisor（LangGraph 版）**：同上，基于 LangGraph `Command(goto=...)` 实现
 - **MCP ReAct Agent**：单 Agent 通过 MCP 协议发现并调用外部工具
 - **MCP Supervisor**：Supervisor 调度 MCP-enabled Agent，实现多 Agent + 外部工具的协作
+- **资本市场研究助理（独立）**：带金融业务身份的 MCP Agent，直连港交所金融数据
+- **资本市场团队（Supervisor）**：Supervisor 协调 ChatAgent + CapitalMarketAgent，自动路由金融/非金融问题
 
 核心设计：
 - **通用框架** (`core/`)：Agent 基类、LLM 工厂、多种路由/协调模式
 - **业务应用** (`hk_law/`)：香港法律多 Agent 系统，每个法域独立 Agent + ES RAG
-- **MCP 集成** (`mcp_bridge/`)：FastMCP Server + MCPAgent，演示 LLM 与外部工具的标准协议通信
+- **MCP 集成** (`mcp_bridge/`)：FastMCP Server + MCPAgent + CapitalMarketAgent，演示 LLM 与外部金融工具的标准协议通信
 
 ---
 
@@ -91,10 +93,23 @@ python main.py
 
 ## 快速开始
 
-### 1. MCP 工具调用演示（新增）
+### 1. 资本市场研究助理（连接 hk-finance-mcp）
 
 ```bash
-# MCP ReAct 模式：单 Agent 调用外部工具
+# 独立模式：CapitalMarketAgent 直连港交所金融数据
+python main.py capital_market --mode research
+
+# 团队模式：Supervisor 自动路由金融/非金融问题
+python main.py capital_market --mode team
+
+# 连接自定义 MCP Server（如真实 hk-finance-mcp）
+python main.py capital_market --mode research --server-url http://127.0.0.1:1888/mcp/sse
+```
+
+### 2. MCP 工具调用演示
+
+```bash
+# MCP ReAct 模式：单 Agent 调用外部工具（Mock 金融数据）
 python main.py mcp --mode react --transport stdio
 
 # MCP + Supervisor 模式：Supervisor 动态调度 MCP Agent
@@ -138,7 +153,7 @@ python -m hk_law.main --mode interactive
 
 本项目包含一个完整的 **香港法律多 Agent 系统**，每个法域对应独立的 Agent，基于 Elasticsearch 提供 RAG 能力。Embedding 和 Rerank 默认使用百炼云端模型，也支持切换到 Ollama 本地模型（零 API Key 成本）。
 
-### 1. 部署 Elasticsearch
+### 1. 部署基础设施
 
 ```bash
 docker-compose up -d
@@ -147,6 +162,7 @@ docker-compose up -d
 启动后：
 - Elasticsearch: http://localhost:9200
 - Kibana: http://localhost:5601
+- MCP Demo Server: http://localhost:18080/sse
 
 ### 2. 下载法律文档
 
@@ -247,9 +263,15 @@ User Query
     |                                    |
     v                                    v
 [LLM ReAct Loop]                   [Tools]
-    |                                - get_weather
-    v                                - calculate
-[Final Answer]                     - search_docs
+    |                                - get_valid_tables
+    v                                - get_table_info
+[Final Answer]                     - query_by_stock_code
+                                   - query_by_sponsor
+                                   - filter_by_date
+                                   - filter_by_numeric_value
+                                   - find_official_company_name
+                                   - query_institution_main_business
+                                   - calculate
 ```
 
 ### 使用方式
@@ -263,7 +285,7 @@ agent = MCPAgent(
     server_cmd=["python", "-m", "mcp_bridge.server.demo_server", "--transport", "stdio"],
     model_type=ModelType.GPT_4O_MINI,
 )
-result = await agent.run("北京今天天气怎么样？")
+result = await agent.run("查询小米集团的股票代码")
 
 # SSE 模式：连接远程 MCP Server
 agent = MCPAgent(
@@ -278,25 +300,114 @@ result = await agent.run("帮我计算 (3+5)*2")
 ```python
 from core.workflows import mcp_react_workflow, mcp_supervisor_workflow
 
-# 单 Agent MCP ReAct
-result = await mcp_react_workflow("搜索 multi-agent routing 相关文档")
+# 单 Agent MCP ReAct（Mock 金融数据）
+result = await mcp_react_workflow("查询小米集团的股票代码和上市信息")
 
 # Supervisor + MCP Agent（多 Agent + 外部工具协作）
 result = await mcp_supervisor_workflow(
-    "北京天气怎么样，顺便算一下 100 除以 4",
+    "查一下腾讯的回购记录，顺便算一下 100 除以 4",
     server_cmd=["python", "-m", "mcp_bridge.server.demo_server"],
 )
 ```
 
 ### MCP Server 工具列表
 
+#### 金融数据版（`demo_server.py`，对齐 `hk-finance-mcp` 设计模式）
+
 | 工具 | 说明 | 输入 |
 |------|------|------|
-| `get_weather` | Mock 天气查询 | `location: str` |
+| `get_valid_tables` | 获取可用数据表列表 | 无 |
+| `get_table_info` | 获取表结构（列名、类型、主键、注释） | `table_name: str` |
+| `query_by_stock_code` | 按股票代码查询（支持多表） | `stock_code, table_name, limit` |
+| `query_by_sponsor` | 按保荐人查询 IPO 信息 | `sponsor_name, table_name, limit` |
+| `filter_by_date` | 按日期范围筛选 | `table_name, date_column, start_date, end_date` |
+| `filter_by_numeric_value` | 按数值条件筛选（`>`, `<`, `=`, `!=` 等） | `table_name, column_name, operator, value` |
+| `find_official_company_name` | 公司简称→官方全称（编辑距离 + 繁体中文校验） | `query, limit, similarity_threshold` |
+| `query_institution_main_business` | 机构主营业务语义检索（Mock 向量检索） | `query, k` |
 | `calculate` | 安全数学计算（AST 白名单，无 eval） | `expression: str` |
-| `search_docs` | 模拟文档语义检索 | `query: str` |
 
-> 所有工具数据均为 Mock，无外部 API 调用，零业务敏感信息。
+> 所有工具数据均为 Mock，无外部 API 调用，零业务敏感信息。工具参数均使用 Pydantic `Field(description=...)` 描述，LLM 可精准理解工具语义。
+
+#### 连接真实 `hk-finance-mcp`
+
+```bash
+# 1. 启动真实金融 MCP Server（需配置 database_url）
+cd /path/to/hk-finance-mcp
+python main.py   # SSE 模式，默认 1888 端口
+
+# 2. 连接真实服务
+python main.py capital_market --mode research --server-url http://127.0.0.1:1888/mcp/sse
+```
+
+---
+
+## 资本市场研究助理
+
+**资本市场研究助理**（`CapitalMarketAgent`）是本项目 MCP 协议集成的核心业务 Agent，专门负责查询港交所金融数据。它继承自 `MCPAgent`，默认连接 `hk-finance-mcp`（或本项目 Mock 版 MCP Server）。
+
+### 设计定位
+
+与通用 `MCPAgent` 的区别：
+1. **金融业务身份**：带有港交所金融数据专家的 system_prompt，指导 LLM 如何拆解用户意图、选择正确工具
+2. **默认指向真实服务**：`DEFAULT_SERVER_URL = http://127.0.0.1:1888/mcp/sse`，直接对接 `hk-finance-mcp`
+3. **可被 Supervisor 调度**：注册到 Agent 工厂后，Supervisor 团队中的"金融专家"角色
+
+### 使用方式
+
+```python
+from core.agents.capital_market_agent import CapitalMarketAgent
+from core.llm.model_type import ModelType
+
+# 默认连接 hk-finance-mcp（需先启动真实服务）
+agent = CapitalMarketAgent()
+result = await agent.run("查询小米集团最近一年的回购记录")
+
+# 连接 Mock MCP Server（零外部依赖）
+agent = CapitalMarketAgent(server_url="http://127.0.0.1:18080/sse")
+result = await agent.run("查一下腾讯的股票代码")
+
+# 自定义模型
+agent = CapitalMarketAgent(model_type=ModelType.QWEN_MAX)
+```
+
+### 工作流封装
+
+```python
+from core.workflows import (
+    capital_market_research_workflow,  # 独立运行
+    capital_market_team_workflow,      # Supervisor 团队协作
+)
+
+# 模式六：单独跑
+result = await capital_market_research_workflow(
+    "查询中金保荐了哪些公司",
+    server_url="http://127.0.0.1:1888/mcp/sse",
+)
+
+# 模式七：Supervisor 团队中作为金融专家
+result = await capital_market_team_workflow(
+    "小米的回购数据是多少？顺便聊聊它的行业地位",
+    server_url="http://127.0.0.1:1888/mcp/sse",
+)
+# Supervisor 会自动判断：金融问题 -> CapitalMarketAgent，闲聊 -> ChatAgent
+```
+
+### MCP Server 设计演进
+
+本项目的 `mcp_bridge/server/demo_server.py` 是基于 `hk-finance-mcp` 生产级设计模式提炼的演示版：
+
+| 设计要素 | `hk-finance-mcp`（生产级） | `demo_server.py`（演示版） |
+|----------|---------------------------|---------------------------|
+| FastMCP + `@mcp.tool()` | ✅ | ✅ |
+| Pydantic `Field(description=...)` | ✅ | ✅ |
+| 统一 `@log_tool_call` 装饰器 | ✅ | ✅ |
+| 严格输入校验（表名、日期、数值、繁体中文） | ✅ | ✅ |
+| MCP Hub 兼容补丁 | ✅ | ✅（可选） |
+| 编辑距离文本匹配 | ✅ | ✅ |
+| 真实数据库（SQLAlchemy + Qdrant） | ✅ | ❌（Mock 内存数据） |
+| Voyage AI Rerank | ✅ | ❌（模拟语义检索） |
+
+> Mock 数据包含 4 张表（`hk_basic_info`、`hk_ipo_info`、`hk_repurchase`、`hk_institution`），覆盖股票代码、IPO 保荐、回购记录、机构业务等典型场景。零外部依赖，面试演示直接跑。
 
 ---
 
@@ -335,11 +446,13 @@ result = await team_supervisor_graph_workflow(
 
 ```python
 from workflows import (
-    intent_condition_workflow,      # 意图识别 + 条件路由
-    team_supervisor_workflow,       # Supervisor Python 版（串行上下文传递）
-    team_supervisor_graph_workflow, # Supervisor LangGraph 版（串行上下文传递）
-    mcp_react_workflow,             # MCP ReAct Agent（外部工具调用）
-    mcp_supervisor_workflow,        # Supervisor + MCP Agent（多 Agent + 工具）
+    intent_condition_workflow,           # 模式一：意图识别 + 条件路由
+    team_supervisor_workflow,            # 模式二：Supervisor Python 版
+    team_supervisor_graph_workflow,      # 模式三：Supervisor LangGraph 版
+    mcp_react_workflow,                  # 模式四：MCP ReAct Agent（通用）
+    mcp_supervisor_workflow,             # 模式五：Supervisor + MCP Agent（通用）
+    capital_market_research_workflow,    # 模式六：资本市场研究助理（独立）
+    capital_market_team_workflow,        # 模式七：Supervisor + 资本市场研究助理（团队协作）
 )
 
 # 模式一：先识别意图，再规则路由
@@ -351,11 +464,23 @@ result = await team_supervisor_workflow("查资料然后写代码", max_rounds=3
 # 模式三：LangGraph 版（支持可视化、断点续跑）
 result = await team_supervisor_graph_workflow("查资料然后写代码", max_rounds=3)
 
-# 模式四：MCP ReAct（单 Agent 调外部工具）
-result = await mcp_react_workflow("北京今天天气怎么样？")
+# 模式四：MCP ReAct（单 Agent 调外部 Mock 工具）
+result = await mcp_react_workflow("查询小米的股票代码")
 
 # 模式五：MCP Supervisor（多 Agent + 外部工具协作）
 result = await mcp_supervisor_workflow("搜索文档然后写代码")
+
+# 模式六：资本市场研究助理（直连金融 MCP Server）
+result = await capital_market_research_workflow(
+    "查询腾讯最近一年的回购记录",
+    server_url="http://127.0.0.1:1888/mcp/sse",
+)
+
+# 模式七：团队 Supervisor + 资本市场研究助理（自动路由金融/非金融问题）
+result = await capital_market_team_workflow(
+    "小米最近回购了多少股票？顺便告诉我天气怎么样",
+    server_url="http://127.0.0.1:1888/mcp/sse",
+)
 ```
 
 ---
@@ -465,16 +590,18 @@ providers:
 ## 项目结构
 
 ```
-├── docker-compose.yml          # Elasticsearch + Kibana 部署
+├── docker-compose.yml          # Elasticsearch + Kibana + MCP Server 部署
 ├── config.yaml                 # 配置文件（可选）
 ├── .env                        # 环境变量文件（可选，自动加载）
 ├── main.py                     # 主入口（hk_law / mcp 子命令）
+├── Dockerfile.mcp              # MCP Server Docker 镜像
 ├── requirements.txt
 ├── core/                       # 底层多 Agent 框架
 │   ├── agents/
 │   │   ├── base.py             # Agent 基类
-│   │   ├── specialized.py      # 预置子 Agent（search / code / chat / analysis）
-│   │   └── mcp_agent.py        # MCP-enabled Agent（ReAct + 工具调用）
+│   │   ├── specialized.py      # 预置子 Agent（search / code / chat / analysis / capital_market）
+│   │   ├── mcp_agent.py        # MCP-enabled Agent（ReAct + 工具调用，通用）
+│   │   └── capital_market_agent.py  # 资本市场研究助理（MCP + 金融业务身份）
 │   ├── llm/
 │   │   ├── config.py           # 配置加载（支持 .env / config.yaml）
 │   │   ├── model_type.py       # 模型枚举
@@ -487,7 +614,7 @@ providers:
 │   │   └── supervisor_graph.py # Supervisor LangGraph 版（串行上下文传递）
 │   ├── utils/
 │   │   └── logger.py           # 统一日志（stderr 输出，带颜色）
-│   └── workflows.py            # 五种工作流组合
+│   └── workflows.py            # 七种工作流组合
 ├── mcp_bridge/                 # MCP 协议集成（新增）
 │   └── server/
 │       └── demo_server.py      # FastMCP Demo Server（stdio / sse）
