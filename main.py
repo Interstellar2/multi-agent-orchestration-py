@@ -4,11 +4,11 @@
 运行方式:
     1. 配置 API Key（.env 文件或环境变量）
     2. 启动 Elasticsearch: docker compose up -d
-    3. 构建向量索引: python -m hk_law.rag.ingest --all
+    3. 构建向量索引: python -m domains.hk_law.rag.ingest --all
     4. 运行 Demo: python main.py
 
 或作为库调用:
-    from hk_law.main import HKLawSystem
+    from domains.hk_law.main import HKLawSystem
     system = HKLawSystem()
     result = await system.ask("我被公司无故解雇，可以追讨什么赔偿？", mode="intent")
 """
@@ -17,18 +17,17 @@ import sys
 
 from core.utils.logger import get_logger
 from core.workflows import (
-    capital_market_research_workflow,
-    capital_market_team_workflow,
     mcp_react_workflow,
     mcp_supervisor_workflow,
 )
+from domains.capital_market.main import demo as capital_market_demo
 
 logger = get_logger(__name__)
 
 
 async def interactive_mode():
     """交互式法律问答"""
-    from hk_law.main import HKLawSystem
+    from domains.hk_law.main import HKLawSystem
     system = HKLawSystem()
 
     logger.info("=" * 60)
@@ -48,64 +47,6 @@ async def interactive_mode():
         result = await system.ask(query, mode="intent")
         logger.info(f"\n[法域] {result['domain']} (置信度: {result['confidence']:.2f})")
         logger.info(f"[回答]\n{result['output']}\n")
-
-
-async def capital_market_demo(
-    mode: str = "research",
-    server_url: str = None,
-):
-    """
-    资本市场研究助理演示入口。
-
-    参数:
-        mode: "research" 单独跑 CapitalMarketAgent，
-              "team" 跑 Supervisor + CapitalMarketAgent + ChatAgent
-        server_url: hk-finance-mcp SSE 地址
-    """
-    logger.info("=" * 60)
-    logger.info("香港资本市场研究助理演示")
-    logger.info("=" * 60)
-
-    if not server_url:
-        server_url = "http://127.0.0.1:1888/mcp/sse"
-        logger.info(f"使用默认 MCP Server: {server_url}")
-        logger.info(
-            "请确保 hk-finance-mcp 已启动: "
-            "cd /Users/hanniandong/python_project/hk-finance-mcp && python main.py"
-        )
-
-    test_queries = [
-        "查询小米集团的股票代码和上市信息",
-        "最近一年有哪些公司在港交所回购股票？",
-        "中金的保荐项目有哪些？",
-        "查询'腾讯'的官方公司全称",
-    ]
-
-    for query in test_queries:
-        logger.info(f"\n[测试问题] {query}")
-        try:
-            if mode == "research":
-                result = await capital_market_research_workflow(
-                    query=query,
-                    server_url=server_url,
-                )
-                output = result.get("output", "N/A")
-            else:
-                result = await capital_market_team_workflow(
-                    query=query,
-                    server_url=server_url,
-                )
-                output = result.get("final_output", "N/A")
-            logger.info(f"[结果]\n{output}\n")
-        except Exception as e:
-            logger.error(f"[错误] {e}")
-            import traceback
-
-            traceback.print_exc()
-
-    logger.info("=" * 60)
-    logger.info("演示完成")
-    logger.info("=" * 60)
 
 
 async def mcp_demo(mode: str = "react", transport: str = "stdio", server_url: str = None):
@@ -222,11 +163,11 @@ async def main():
         if args.mode == "interactive":
             await interactive_mode()
         else:
-            from hk_law.main import demo
+            from domains.hk_law.main import demo
             await demo()
     else:
         # 默认行为：向后兼容，跑 hk_law demo
-        from hk_law.main import demo
+        from domains.hk_law.main import demo
         await demo()
 
 

@@ -4,9 +4,9 @@
 从香港律政司电子版香港法例 (e-Legislation) 自动下载各法域的 PDF 文档。
 
 用法:
-    python -m hk_law.rag.download --all          # 下载所有法域
-    python -m hk_law.rag.download criminal       # 下载单个法域
-    python -m hk_law.rag.download criminal civil # 下载多个法域
+    python -m domains.hk_law.rag.download --all          # 下载所有法域
+    python -m domains.hk_law.rag.download criminal       # 下载单个法域
+    python -m domains.hk_law.rag.download criminal civil # 下载多个法域
 
 说明:
     e-Legislation 网站有客户端配置检测机制（CSRF + Cookie + JS 重定向），

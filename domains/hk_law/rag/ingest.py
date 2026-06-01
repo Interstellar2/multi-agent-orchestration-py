@@ -4,19 +4,19 @@
 
 用法:
     # 索引单个法域
-    python -m hk_law.rag.ingest criminal
+    python -m domains.hk_law.rag.ingest criminal
 
     # 索引所有法域
-    python -m hk_law.rag.ingest --all
+    python -m domains.hk_law.rag.ingest --all
 
     # 重建索引（先删除再重建）
-    python -m hk_law.rag.ingest criminal --rebuild
+    python -m domains.hk_law.rag.ingest criminal --rebuild
 """
 import argparse
 import asyncio
 import sys
 
-from hk_law.rag.engine import check_es_health, delete_index, index_documents
+from domains.hk_law.rag.engine import check_es_health, delete_index, index_documents
 from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -38,7 +38,7 @@ async def main():
 
     domains = []
     if args.all:
-        from hk_law.agents import list_domains
+        from domains.hk_law.agents import list_domains
         domains = list_domains()
     elif args.domain:
         domains = [args.domain]

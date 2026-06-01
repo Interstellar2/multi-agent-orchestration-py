@@ -7,10 +7,10 @@
   3. 每个 Agent 自带 RAG，基于实际法律条文回答
 
 运行方式:
-    python -m hk_law.main
+    python -m domains.hk_law.main
 
 或:
-    from hk_law.main import HKLawSystem
+    from domains.hk_law.main import HKLawSystem
     system = HKLawSystem()
     result = await system.ask("我被公司无故解雇，可以追讨什么赔偿？")
 """
@@ -18,8 +18,8 @@ import asyncio
 
 from typing import Dict
 
-from hk_law.agents import get_hk_law_agent, list_domains
-from hk_law.agents.base import HKLawAgent
+from domains.hk_law.agents import get_hk_law_agent, list_domains
+from domains.hk_law.agents.base import HKLawAgent
 from core.llm.model_type import ModelType
 from core.routing.condition import ConditionRouter
 from core.routing.intent import IntentClassifier

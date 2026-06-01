@@ -13,8 +13,10 @@
 
 核心设计：
 - **通用框架** (`core/`)：Agent 基类、LLM 工厂、多种路由/协调模式
-- **业务应用** (`hk_law/`)：香港法律多 Agent 系统，每个法域独立 Agent + ES RAG
-- **MCP 集成** (`mcp_bridge/`)：FastMCP Server + MCPAgent + CapitalMarketAgent，演示 LLM 与外部金融工具的标准协议通信
+- **业务域** (`domains/`)：垂直业务应用
+  - `hk_law/`：香港法律多 Agent 系统，每个法域独立 Agent + ES RAG
+  - `capital_market/`：香港资本市场研究助理（MCP + 金融业务身份）
+- **MCP 集成** (`mcp_bridge/`)：FastMCP Server + MCPAgent，演示 LLM 与外部金融工具的标准协议通信
 
 ---
 
@@ -144,7 +146,7 @@ python main.py hk_law --mode interactive
 python main.py hk_law --mode demo
 
 # 也可以直接调用模块
-python -m hk_law.main --mode interactive
+python -m domains.hk_law.main --mode interactive
 ```
 
 ---
@@ -170,11 +172,11 @@ docker-compose up -d
 
 | 法域 | 目录 | 建议下载条例 |
 |------|------|-------------|
-| 刑事 | `hk_law/documents/criminal/` | 《刑事罪行条例》(Cap. 200)、《盗窃罪条例》(Cap. 210) |
-| 民事 | `hk_law/documents/civil/` | 《合约(第三方权利)条例》(Cap. 623)、《失实陈述条例》(Cap. 284) |
-| 公司 | `hk_law/documents/company/` | 《公司条例》(Cap. 622) |
-| 雇佣 | `hk_law/documents/employment/` | 《雇佣条例》(Cap. 57) |
-| 物业 | `hk_law/documents/property/` | 《物业转易及财产条例》(Cap. 219)、《建筑物管理条例》(Cap. 344) |
+| 刑事 | `domains/hk_law/documents/criminal/` | 《刑事罪行条例》(Cap. 200)、《盗窃罪条例》(Cap. 210) |
+| 民事 | `domains/hk_law/documents/civil/` | 《合约(第三方权利)条例》(Cap. 623)、《失实陈述条例》(Cap. 284) |
+| 公司 | `domains/hk_law/documents/company/` | 《公司条例》(Cap. 622) |
+| 雇佣 | `domains/hk_law/documents/employment/` | 《雇佣条例》(Cap. 57) |
+| 物业 | `domains/hk_law/documents/property/` | 《物业转易及财产条例》(Cap. 219)、《建筑物管理条例》(Cap. 344) |
 
 下载地址：https://www.elegislation.gov.hk/
 
@@ -182,13 +184,13 @@ docker-compose up -d
 
 ```bash
 # 索引单个法域
-python -m hk_law.rag.ingest criminal
+python -m domains.hk_law.rag.ingest criminal
 
 # 索引所有法域
-python -m hk_law.rag.ingest --all
+python -m domains.hk_law.rag.ingest --all
 
 # 重建索引（先删除再重建）
-python -m hk_law.rag.ingest criminal --rebuild
+python -m domains.hk_law.rag.ingest criminal --rebuild
 ```
 
 索引流程：
@@ -212,7 +214,7 @@ export RERANK_PROVIDER=local
 export OLLAMA_HOST=http://localhost:11434
 
 # 4. 构建索引（与上面命令相同）
-python -m hk_law.rag.ingest --all
+python -m domains.hk_law.rag.ingest --all
 ```
 
 ### 4. 运行法律问答
@@ -225,13 +227,13 @@ python main.py hk_law --mode interactive
 python main.py hk_law --mode demo
 
 # 也可以直接调用模块
-python -m hk_law.main --mode interactive
+python -m domains.hk_law.main --mode interactive
 ```
 
 或使用 API：
 
 ```python
-from hk_law.main import HKLawSystem
+from domains.hk_law.main import HKLawSystem
 
 system = HKLawSystem()
 
@@ -355,7 +357,7 @@ python main.py capital_market --mode research --server-url http://127.0.0.1:1888
 ### 使用方式
 
 ```python
-from core.agents.capital_market_agent import CapitalMarketAgent
+from domains.capital_market.agents import CapitalMarketAgent
 from core.llm.model_type import ModelType
 
 # 默认连接 hk-finance-mcp（需先启动真实服务）
@@ -598,10 +600,10 @@ providers:
 ├── requirements.txt
 ├── core/                       # 底层多 Agent 框架
 │   ├── agents/
-│   │   ├── base.py             # Agent 基类
-│   │   ├── specialized.py      # 预置子 Agent（search / code / chat / analysis / capital_market）
-│   │   ├── mcp_agent.py        # MCP-enabled Agent（ReAct + 工具调用，通用）
-│   │   └── capital_market_agent.py  # 资本市场研究助理（MCP + 金融业务身份）
+│   │   ├── base.py             # Agent 统一基座（直接 LLM / ReAct + ToolProvider）
+│   │   ├── toolkit.py          # ToolProvider ABC + MCPClientProvider
+│   │   ├── specialized.py      # 预置子 Agent（search / code / chat / analysis）
+│   │   └── mcp_agent.py        # MCP-enabled Agent（向后兼容包装器）
 │   ├── llm/
 │   │   ├── config.py           # 配置加载（支持 .env / config.yaml）
 │   │   ├── model_type.py       # 模型枚举
@@ -618,7 +620,33 @@ providers:
 ├── mcp_bridge/                 # MCP 协议集成（新增）
 │   └── server/
 │       └── demo_server.py      # FastMCP Demo Server（stdio / sse）
-└── hk_law/                     # 香港法律业务应用
+└── domains/                    # 业务域聚合（与 core/ 对齐）
+    ├── hk_law/                 # 香港法律业务应用
+    │   ├── main.py             # 法律系统入口
+    │   ├── agents/
+    │   │   ├── base.py         # 法律 Agent 基类（继承 core.agents）
+    │   │   ├── criminal.py     # 刑事法 Agent
+    │   │   ├── civil.py        # 民事/合约法 Agent
+    │   │   ├── company.py      # 公司法 Agent
+    │   │   ├── employment.py   # 雇佣法 Agent
+    │   │   └── property.py     # 物业法 Agent
+    │   ├── rag/
+    │   │   ├── engine.py       # ES + 百炼 Embedding/Rerank RAG 引擎
+    │   │   ├── ingest.py       # 文档索引 CLI 工具
+    │   │   └── download.py     # 法律文档下载工具
+    │   └── documents/          # 法律文档目录
+    │       └── SOURCES.md      # 文档来源说明
+    │       ├── criminal/
+    │       ├── civil/
+    │       ├── company/
+    │       ├── employment/
+    │       └── property/
+    └── capital_market/         # 香港资本市场业务应用
+        └── agents/
+            ├── base.py         # CapitalMarketAgent（Agent + MCPClientProvider）
+            └── __init__.py     # 注册表导出
+        ├── base.py             # CapitalMarketAgent（Agent + MCPClientProvider）
+        └── __init__.py         # 注册表导出
     ├── main.py                 # 法律系统入口
     ├── agents/
     │   ├── base.py             # 法律 Agent 基类（继承 core.agents）

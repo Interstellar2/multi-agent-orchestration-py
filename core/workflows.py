@@ -180,87 +180,28 @@ async def team_supervisor_graph_workflow(
     return result
 
 
-async def capital_market_research_workflow(
-    query: str,
-    server_url: Optional[str] = None,
-    server_cmd: Optional[List[str]] = None,
-    model_type: ModelType = None,
-    llm: Optional[BaseChatModel] = None,
-) -> Dict:
+# ---------------------------------------------------------------------------
+# 模式六/七：资本市场工作流（委托给业务域，保持向后兼容）
+# ---------------------------------------------------------------------------
+
+async def capital_market_research_workflow(*args, **kwargs) -> Dict:
     """
     模式六：资本市场研究助理（直连 hk-finance-mcp）
 
-    专门处理港交所金融数据查询，通过 MCP 协议调用 text2sql、
-    向量检索、公司名称模糊匹配等真实业务工具。
-
-    参数:
-        server_url: hk-finance-mcp SSE 地址，默认 http://127.0.0.1:1888/mcp/sse
-        server_cmd: stdio 启动命令（与 server_url 二选一）
+    实现已移至 domains.capital_market.main，此处保留向后兼容导出。
     """
-    from core.agents.capital_market_agent import CapitalMarketAgent
-
-    logger.info(f"[Workflow] 启动资本市场研究助理 | query={query[:80]}")
-
-    agent = CapitalMarketAgent(
-        model_type=model_type,
-        llm=llm,
-        server_url=server_url,
-        server_cmd=server_cmd,
-    )
-    output = await agent.run(query)
-    logger.info(f"[Workflow] 完成资本市场研究助理 | output_len={len(output)}")
-    return {
-        "mode": "capital_market_research",
-        "agent": agent.name,
-        "output": output,
-    }
+    from domains.capital_market.main import capital_market_research_workflow as _wf
+    return await _wf(*args, **kwargs)
 
 
-async def capital_market_team_workflow(
-    query: str,
-    server_url: Optional[str] = None,
-    server_cmd: Optional[List[str]] = None,
-    model_type: ModelType = None,
-    llm: Optional[BaseChatModel] = None,
-    supervisor_model: ModelType = None,
-    supervisor_llm: Optional[BaseChatModel] = None,
-    max_rounds: int = 3,
-) -> Dict:
+async def capital_market_team_workflow(*args, **kwargs) -> Dict:
     """
     模式七：Team Supervisor + 资本市场研究助理
 
-    在 Supervisor 团队中注入 CapitalMarketAgent 作为金融数据专家。
-    用户问港股/金融问题时路由给它，问一般问题时路由给 ChatAgent。
+    实现已移至 domains.capital_market.main，此处保留向后兼容导出。
     """
-    from core.agents.capital_market_agent import CapitalMarketAgent
-
-    logger.info(f"[Workflow] 启动资本市场团队协作 | query={query[:80]}")
-
-    capital_agent = CapitalMarketAgent(
-        model_type=model_type,
-        llm=llm,
-        server_url=server_url,
-        server_cmd=server_cmd,
-    )
-    base_agents = _resolve_agents(
-        ["chat"],
-        model_type=model_type,
-        llm=llm,
-    )
-    all_agents = base_agents + [capital_agent]
-
-    supervisor = TeamSupervisor(
-        agents=all_agents,
-        model_type=supervisor_model or model_type,
-        llm=supervisor_llm,
-        max_rounds=max_rounds,
-    )
-    result = await supervisor.run(query)
-    logger.info(
-        f"[Workflow] 完成资本市场团队协作 | "
-        f"调用 history={result.get('called_agents')}"
-    )
-    return {"mode": "capital_market_team", **result}
+    from domains.capital_market.main import capital_market_team_workflow as _wf
+    return await _wf(*args, **kwargs)
 
 
 async def mcp_react_workflow(

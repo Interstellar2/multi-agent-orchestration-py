@@ -11,7 +11,6 @@ from typing import Any, Dict, Optional
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from core.agents.base import Agent
-from core.agents.capital_market_agent import CapitalMarketAgent
 from core.llm.model_type import ModelType
 
 
@@ -64,7 +63,7 @@ class AnalysisAgent(Agent):
 # 注册表，方便通过名称获取 Agent
 _AGENT_REGISTRY = {
     agent.name: agent
-    for agent in [SearchAgent, CodeAgent, ChatAgent, AnalysisAgent, CapitalMarketAgent]
+    for agent in [SearchAgent, CodeAgent, ChatAgent, AnalysisAgent]
 }
 
 

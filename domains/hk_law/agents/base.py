@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from core.agents.base import Agent as BaseAgent
-from hk_law.rag.engine import DomainRetriever
+from domains.hk_law.rag.engine import DomainRetriever
 from core.llm.model_type import ModelType
 from core.utils.logger import get_logger
 

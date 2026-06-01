@@ -20,19 +20,21 @@ from typing import List, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from core.agents.mcp_agent import MCPAgent
+from core.agents.base import Agent
+from core.agents.toolkit import MCPClientProvider
 from core.llm.model_type import ModelType
 from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class CapitalMarketAgent(MCPAgent):
+class CapitalMarketAgent(Agent):
     """
     香港资本市场研究助理。
 
-    继承 MCPAgent 的 ReAct + MCP Client 能力，默认连接 hk-finance-mcp
-    来获取港交所金融数据（text2sql、向量检索、公司名称模糊匹配等）。
+    继承 Agent 统一基座，组合 MCPClientProvider 实现 MCP 能力。
+    默认连接 hk-finance-mcp 来获取港交所金融数据（text2sql、向量检索、
+    公司名称模糊匹配等）。
 
     与通用 MCPAgent 的区别：
       1. 带有金融业务身份和领域知识（system_prompt）
@@ -94,9 +96,5 @@ class CapitalMarketAgent(MCPAgent):
                 f"使用默认 hk-finance-mcp SSE: {server_url}"
             )
 
-        super().__init__(
-            model_type=model_type,
-            llm=llm,
-            server_url=server_url,
-            server_cmd=server_cmd,
-        )
+        provider = MCPClientProvider(server_url=server_url, server_cmd=server_cmd)
+        super().__init__(model_type=model_type, llm=llm, tools=[provider])
