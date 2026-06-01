@@ -9,7 +9,8 @@
 """
 from typing import Any, Dict, Optional
 
-from langchain.schema import Document, HumanMessage, SystemMessage
+from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from core.agents.base import Agent as BaseAgent

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from elasticsearch import Elasticsearch
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from core.utils.logger import get_logger
 

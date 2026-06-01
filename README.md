@@ -1,11 +1,18 @@
-# Multi-Agent + Intent Recognition Demo
+# Multi-Agent + MCP Demo
 
-一个轻量级的多 Agent 调用与意图识别示例项目，简化为纯 Python 实现。
+一个轻量级的多 Agent 协作与 MCP 协议集成示例项目，纯 Python 实现。
 
-支持三种多 Agent 协作模式：
+支持 **五种协作模式**：
 - **意图识别 + 条件路由**：LLM 识别意图，规则路由到固定 Agent
-- **Team Supervisor（循环版）**：LLM 动态决策调用哪个 Agent，支持多轮
-- **Team Supervisor（LangGraph 版）**：同上，但基于 LangGraph `Command(goto=...)` 实现
+- **Team Supervisor（循环版）**：LLM 动态决策调用哪个 Agent，串行执行，上下文传递
+- **Team Supervisor（LangGraph 版）**：同上，基于 LangGraph `Command(goto=...)` 实现
+- **MCP ReAct Agent**：单 Agent 通过 MCP 协议发现并调用外部工具
+- **MCP Supervisor**：Supervisor 调度 MCP-enabled Agent，实现多 Agent + 外部工具的协作
+
+核心设计：
+- **通用框架** (`core/`)：Agent 基类、LLM 工厂、多种路由/协调模式
+- **业务应用** (`hk_law/`)：香港法律多 Agent 系统，每个法域独立 Agent + ES RAG
+- **MCP 集成** (`mcp_bridge/`)：FastMCP Server + MCPAgent，演示 LLM 与外部工具的标准协议通信
 
 ---
 
@@ -82,7 +89,23 @@ python main.py
 
 ---
 
-## 快速开始（通用 Demo）
+## 快速开始
+
+### 1. MCP 工具调用演示（新增）
+
+```bash
+# MCP ReAct 模式：单 Agent 调用外部工具
+python main.py mcp --mode react --transport stdio
+
+# MCP + Supervisor 模式：Supervisor 动态调度 MCP Agent
+python main.py mcp --mode supervisor --transport stdio
+
+# SSE 模式（需先手动启动 MCP Server）
+python -m mcp_bridge.server.demo_server --transport sse --port 18080
+python main.py mcp --mode react --transport sse --server-url http://127.0.0.1:18080/sse
+```
+
+### 2. 通用多 Agent Demo
 
 ```bash
 python -m core.demo
@@ -90,11 +113,24 @@ python -m core.demo
 
 输出包含 6 个演示场景：
 1. 意图识别 + 条件路由
-2. Team Supervisor（循环版）
-3. Team Supervisor（LangGraph 版）
+2. Team Supervisor（循环版，串行上下文传递）
+3. Team Supervisor（LangGraph 版，串行上下文传递）
 4. 混合模型（不同 Agent 用不同 LLM）
 5. 工厂 API 与动态注册
 6. 扩展自定义 Agent
+
+### 3. 香港法律多 Agent 系统
+
+```bash
+# 交互式问答
+python main.py hk_law --mode interactive
+
+# 或运行 Demo 测试用例
+python main.py hk_law --mode demo
+
+# 也可以直接调用模块
+python -m hk_law.main --mode interactive
+```
 
 ---
 
@@ -167,10 +203,10 @@ python -m hk_law.rag.ingest --all
 
 ```bash
 # 交互式问答
-python main.py --mode interactive
+python main.py hk_law --mode interactive
 
 # 或运行 Demo 测试用例
-python main.py --mode demo
+python main.py hk_law --mode demo
 
 # 也可以直接调用模块
 python -m hk_law.main --mode interactive
@@ -186,11 +222,81 @@ system = HKLawSystem()
 # 意图识别 + 条件路由（适合单法域问题）
 result = await system.ask("我被公司无故解雇了", mode="intent")
 
-# Supervisor 动态协调（适合交叉法域问题）
+# Supervisor 动态协调（适合交叉法域问题，串行上下文传递）
 result = await system.ask("我被公司解雇还欠工资", mode="supervisor")
 
 print(result["output"])
 ```
+
+---
+
+## MCP 协议集成（新增）
+
+本项目演示了 **Model Context Protocol (MCP)** 的完整集成链路：
+
+### 架构
+
+```
+User Query
+    |
+    v
+[MCPAgent / Supervisor]
+    |
+    v
+[MCP Client] --(stdio/SSE)--> [MCP Server (FastMCP)]
+    |                                    |
+    v                                    v
+[LLM ReAct Loop]                   [Tools]
+    |                                - get_weather
+    v                                - calculate
+[Final Answer]                     - search_docs
+```
+
+### 使用方式
+
+```python
+from core.agents.mcp_agent import MCPAgent
+from core.llm.model_type import ModelType
+
+# stdio 模式：自动启动本地 MCP Server
+agent = MCPAgent(
+    server_cmd=["python", "-m", "mcp_bridge.server.demo_server", "--transport", "stdio"],
+    model_type=ModelType.GPT_4O_MINI,
+)
+result = await agent.run("北京今天天气怎么样？")
+
+# SSE 模式：连接远程 MCP Server
+agent = MCPAgent(
+    server_url="http://127.0.0.1:18080/sse",
+    model_type=ModelType.GPT_4O_MINI,
+)
+result = await agent.run("帮我计算 (3+5)*2")
+```
+
+### MCP 工作流
+
+```python
+from core.workflows import mcp_react_workflow, mcp_supervisor_workflow
+
+# 单 Agent MCP ReAct
+result = await mcp_react_workflow("搜索 multi-agent routing 相关文档")
+
+# Supervisor + MCP Agent（多 Agent + 外部工具协作）
+result = await mcp_supervisor_workflow(
+    "北京天气怎么样，顺便算一下 100 除以 4",
+    server_cmd=["python", "-m", "mcp_bridge.server.demo_server"],
+)
+```
+
+### MCP Server 工具列表
+
+| 工具 | 说明 | 输入 |
+|------|------|------|
+| `get_weather` | Mock 天气查询 | `location: str` |
+| `calculate` | 安全数学计算（AST 白名单，无 eval） | `expression: str` |
+| `search_docs` | 模拟文档语义检索 | `query: str` |
+
+> 所有工具数据均为 Mock，无外部 API 调用，零业务敏感信息。
 
 ---
 
@@ -225,23 +331,31 @@ result = await team_supervisor_graph_workflow(
 )
 ```
 
-### 3. 三种工作流模式
+### 3. 五种工作流模式
 
 ```python
 from workflows import (
     intent_condition_workflow,      # 意图识别 + 条件路由
-    team_supervisor_workflow,       # Supervisor Python 版
-    team_supervisor_graph_workflow, # Supervisor LangGraph 版
+    team_supervisor_workflow,       # Supervisor Python 版（串行上下文传递）
+    team_supervisor_graph_workflow, # Supervisor LangGraph 版（串行上下文传递）
+    mcp_react_workflow,             # MCP ReAct Agent（外部工具调用）
+    mcp_supervisor_workflow,        # Supervisor + MCP Agent（多 Agent + 工具）
 )
 
 # 模式一：先识别意图，再规则路由
 result = await intent_condition_workflow("写个快排")
 
-# 模式二：Supervisor 动态决策
+# 模式二：Supervisor 动态决策（串行链式调用，后 Agent 能看到前 Agent 输出）
 result = await team_supervisor_workflow("查资料然后写代码", max_rounds=3)
 
 # 模式三：LangGraph 版（支持可视化、断点续跑）
 result = await team_supervisor_graph_workflow("查资料然后写代码", max_rounds=3)
+
+# 模式四：MCP ReAct（单 Agent 调外部工具）
+result = await mcp_react_workflow("北京今天天气怎么样？")
+
+# 模式五：MCP Supervisor（多 Agent + 外部工具协作）
+result = await mcp_supervisor_workflow("搜索文档然后写代码")
 ```
 
 ---
@@ -354,34 +468,29 @@ providers:
 ├── docker-compose.yml          # Elasticsearch + Kibana 部署
 ├── config.yaml                 # 配置文件（可选）
 ├── .env                        # 环境变量文件（可选，自动加载）
-├── main.py                     # 通用 demo 入口
+├── main.py                     # 主入口（hk_law / mcp 子命令）
 ├── requirements.txt
 ├── core/                       # 底层多 Agent 框架
 │   ├── agents/
 │   │   ├── base.py             # Agent 基类
-│   │   └── specialized.py      # 预置子 Agent
+│   │   ├── specialized.py      # 预置子 Agent（search / code / chat / analysis）
+│   │   └── mcp_agent.py        # MCP-enabled Agent（ReAct + 工具调用）
 │   ├── llm/
 │   │   ├── config.py           # 配置加载（支持 .env / config.yaml）
 │   │   ├── model_type.py       # 模型枚举
 │   │   ├── factory.py          # LLM 工厂
-│   │   └── providers/
-│   │       ├── openai.py       # OpenAI 模型实例
-│   │       ├── bailian.py      # 百炼 Chat 模型实例
-│   │       ├── bailian_embedding.py  # 百炼 Embedding (text-embedding-v3)
-│   │       ├── bailian_rerank.py     # 百炼 Rerank (gte-rerank)
-│   │       ├── deepseek.py     # DeepSeek 模型实例
-│   │       ├── kimi.py         # Kimi 模型实例
-│   │       ├── openrouter.py   # OpenRouter 模型实例
-│   │       ├── ollama_embedding.py   # Ollama 本地 Embedding
-│   │       └── local_rerank.py       # 本地余弦相似度 Rerank
+│   │   └── providers/          # 各提供商模型实例
 │   ├── routing/
 │   │   ├── intent.py           # 意图识别
 │   │   ├── condition.py        # 条件路由
-│   │   ├── supervisor.py       # Supervisor 循环版
-│   │   └── supervisor_graph.py # Supervisor LangGraph 版
+│   │   ├── supervisor.py       # Supervisor 循环版（串行上下文传递）
+│   │   └── supervisor_graph.py # Supervisor LangGraph 版（串行上下文传递）
 │   ├── utils/
-│   │   └── logger.py           # 日志工具
-│   └── workflows.py            # 三种工作流组合
+│   │   └── logger.py           # 统一日志（stderr 输出，带颜色）
+│   └── workflows.py            # 五种工作流组合
+├── mcp_bridge/                 # MCP 协议集成（新增）
+│   └── server/
+│       └── demo_server.py      # FastMCP Demo Server（stdio / sse）
 └── hk_law/                     # 香港法律业务应用
     ├── main.py                 # 法律系统入口
     ├── agents/
@@ -428,6 +537,8 @@ Provider 通过环境变量切换：
 - LangChain >= 0.3.0
 - Pydantic >= 2.0.0
 - Elasticsearch >= 8.15.0
+- mcp >= 1.0.0
+- fastmcp >= 2.0.0
 - Docker & Docker Compose（用于部署 ES）
 - Ollama（可选，用于本地 Embedding）
 

@@ -4,7 +4,7 @@
 """
 from typing import List, Optional
 
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, Field
 

@@ -24,7 +24,7 @@ LLM 配置（三选一，优先级从高到低）：
 from abc import ABC
 from typing import Any, Dict, Optional
 
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from core.llm.factory import llm_factory

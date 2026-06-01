@@ -44,6 +44,8 @@ class ColoredFormatter(logging.Formatter):
             module = module[5:]
         if module.startswith("hk_law."):
             module = module[7:]
+        if module.startswith("mcp_bridge."):
+            module = module[11:]
 
         record.levelname_colored = f"{color}{record.levelname:8s}{reset}"
         record.module_short = module
@@ -63,7 +65,7 @@ def _setup_logging() -> None:
     console_fmt = ColoredFormatter(
         fmt="%(levelname_colored)s | %(module_short)-20s | %(message)s",
     )
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(console_fmt)
     root_logger.addHandler(console_handler)
