@@ -19,7 +19,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from core.agents.base import Agent
 from core.llm.model_type import ModelType
 from core.routing.supervisor import TeamSupervisor
-from core.workflows import _resolve_agents
+from core.agents.resolver import resolve_agents
 from domains.capital_market.agents import CapitalMarketAgent
 from core.utils.logger import get_logger
 
@@ -80,7 +80,7 @@ async def capital_market_team_workflow(
         server_url=server_url,
         server_cmd=server_cmd,
     )
-    base_agents = _resolve_agents(
+    base_agents = resolve_agents(
         ["chat"],
         model_type=model_type,
         llm=llm,

@@ -73,11 +73,16 @@ class Agent(ABC):
 
         self.tools = tools or []
 
-    async def run(self, query: str, context: Optional[Dict[str, Any]] = None) -> str:
+    async def run(self, query: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         """
         执行 Agent 任务。
         - 无 tools -> 直接调用 LLM
         - 有 tools -> ReAct 循环（工具发现 -> LLM 决策 -> 工具执行 -> 结果回传）
+
+        Args:
+            query: 用户查询
+            context: 额外上下文（保留兼容）
+            **kwargs: 子类可扩展参数（如 rewritten_query, statutes 等）
         """
         if self.tools:
             return await self._react_run(query, context)

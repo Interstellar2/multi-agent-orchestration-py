@@ -7,7 +7,7 @@
   - 系统提示词 (system_prompt)
   - 向量检索器 (DomainRetriever)
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -45,20 +45,30 @@ class HKLawAgent(BaseAgent):
         if self.domain:
             self._retriever = DomainRetriever(domain=self.domain, top_k=top_k)
 
-    async def run(self, query: str, context: Optional[Dict[str, Any]] = None) -> str:
+    async def run(self, query: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         """
         执行流程：
-        1. RAG 检索相关法律条文
+        1. RAG 检索相关法律条文（优先使用 rewritten_query 做检索）
         2. 将检索结果组装成上下文
         3. 调用 LLM 生成回答
-        """
-        logger.info(f"[{self.name}] 开始 | query={query[:80]}")
 
-        # 1. 检索
+        Args:
+            query: 用户原始问题
+            context: 额外上下文（保留兼容）
+            **kwargs: 子类扩展参数
+                - rewritten_query: 语义改写后的查询，用于 RAG 检索优化
+                - statutes: 涉及的具体法例列表（预留用于 metadata 过滤）
+        """
+        rewritten_query = kwargs.get("rewritten_query")
+        statutes = kwargs.get("statutes")
+        search_query = rewritten_query or query
+        logger.info(f"[{self.name}] 开始 | query={query[:80]} | search_query={search_query[:80]}")
+
+        # 1. 检索（使用改写后的查询以获得更好的召回）
         retrieved_docs: list[Document] = []
         if self._retriever:
             try:
-                retrieved_docs = self._retriever.search(query)
+                retrieved_docs = self._retriever.search(search_query)
                 logger.info(f"[{self.name}] RAG 检索完成 | 召回 {len(retrieved_docs)} 条文档")
             except Exception as e:
                 # ES 未启动、索引不存在、或网络问题
@@ -67,7 +77,7 @@ class HKLawAgent(BaseAgent):
         # 2. 组装上下文
         context_text = self._build_context(retrieved_docs)
 
-        # 3. 调用 LLM
+        # 3. 调用 LLM（始终使用原始 query 保证回答贴近用户真实意图）
         messages = [
             SystemMessage(content=self.system_prompt),
             HumanMessage(

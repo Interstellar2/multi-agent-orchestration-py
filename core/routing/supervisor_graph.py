@@ -23,6 +23,7 @@ from typing_extensions import TypedDict
 from core.agents.base import Agent
 from core.llm.factory import llm_factory
 from core.llm.model_type import ModelType
+from core.routing.supervisor_base import SupervisorPromptBuilder, AgentExecutionEngine
 from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -53,17 +54,6 @@ def create_coordinator_node(agents: List[Agent], llm: BaseChatModel, max_rounds:
     agent_names = [a.name for a in agents]
     goto_type = Literal[tuple(agent_names + ["END"])]
 
-    def _format_accumulated_outputs(outputs: List[Dict[str, Any]]) -> str:
-        """将前面 Agent 的输出格式化为上下文字符串。"""
-        if not outputs:
-            return ""
-        lines = []
-        for item in outputs:
-            lines.append(f"--- {item['agent']} (round {item['round']}) ---")
-            lines.append(item["output"])
-            lines.append("")
-        return "\n".join(lines)
-
     async def _node(state: SupervisorState) -> Command[goto_type]:
         round_num = state["round_num"]
         # 防循环：超过最大轮数直接结束
@@ -76,32 +66,13 @@ def create_coordinator_node(agents: List[Agent], llm: BaseChatModel, max_rounds:
             logger.info("[SupervisorGraph] 所有 Agent 已调用，结束")
             return Command(goto="END")
 
-        # 构建 prompt（包含前面 Agent 的输出，供 Supervisor 做更合理的调度）
-        accumulated = _format_accumulated_outputs(state["outputs"])
-        team_info = "\n".join(
-            f"- {a.name}: {a.system_prompt[:80]}..." for a in available
-        )
-        called_info = (
-            f"\nAlready called: {state['called_agents']}\n" if state["called_agents"] else ""
-        )
-        context_info = f"\nPrevious agent outputs:\n{accumulated}\n" if accumulated else ""
-        available_names = [a.name for a in available]
-        enum_hint = f"\nAllowed values for 'next': {available_names + ['END']}\n"
-
-        prompt = (
-            "You are a team coordinator. Analyze the user's request and select "
-            "the most appropriate agent to handle it.\n\n"
-            f"User request: {state['query']}\n"
-            f"{context_info}"
-            f"{called_info}\n"
-            f"Available agents:\n{team_info}\n"
-            f"{enum_hint}\n"
-            "Rules:\n"
-            "1. Do not call the same agent repeatedly.\n"
-            "2. If the task is complete, set next to 'END'.\n"
-            "3. You must output a JSON object with:\n"
-            "   - next: the agent name to call next, or 'END' if finished\n"
-            "   - reason: why you chose this agent"
+        # 复用公共 PromptBuilder
+        accumulated = AgentExecutionEngine.format_accumulated_outputs(state["outputs"])
+        prompt = SupervisorPromptBuilder.build(
+            state["query"],
+            available,
+            state["called_agents"],
+            accumulated,
         )
 
         messages = [
@@ -127,18 +98,6 @@ def create_coordinator_node(agents: List[Agent], llm: BaseChatModel, max_rounds:
     return _node
 
 
-def _format_accumulated_outputs(outputs: List[Dict[str, Any]]) -> str:
-    """将前面 Agent 的输出格式化为上下文字符串。"""
-    if not outputs:
-        return ""
-    lines = []
-    for item in outputs:
-        lines.append(f"--- {item['agent']} (round {item['round']}) ---")
-        lines.append(item["output"])
-        lines.append("")
-    return "\n".join(lines)
-
-
 def create_agent_node(agent: Agent):
     """
     为每个子 Agent 创建一个 LangGraph 节点。
@@ -149,18 +108,10 @@ def create_agent_node(agent: Agent):
     async def _node(state: SupervisorState) -> Command[Literal["coordinator"]]:
         logger.info(f"[SupervisorGraph] 执行 agent={agent.name} | round={state["round_num"] + 1}")
 
-        # 构建增强 query：把前面 Agent 的输出作为上下文附加
-        accumulated = _format_accumulated_outputs(state["outputs"])
-        if accumulated:
-            enhanced_query = (
-                f"Original user request: {state['query']}\n\n"
-                f"Previous agent outputs:\n{accumulated}\n\n"
-                f"Please continue to help with the original request."
-            )
-        else:
-            enhanced_query = state["query"]
+        # 复用公共 AgentExecutionEngine
+        accumulated = AgentExecutionEngine.format_accumulated_outputs(state["outputs"])
+        output = await AgentExecutionEngine.execute(agent, state["query"], accumulated)
 
-        output = await agent.run(enhanced_query)
         return Command(
             update={
                 "outputs": [

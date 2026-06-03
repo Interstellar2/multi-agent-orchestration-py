@@ -1,5 +1,5 @@
 """
-Team Supervisor 模块（动态多 Agent 协调）
+Team Supervisor 模块（Python 原生循环版）
 参考 agenthub-py team_agent_node，用 LLM 做 Supervisor，
 根据任务动态选择 Agent，支持多轮调用。
 """
@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from core.agents.base import Agent
 from core.llm.factory import llm_factory
 from core.llm.model_type import ModelType
+from core.routing.supervisor_base import SupervisorPromptBuilder, AgentExecutionEngine
 from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -45,41 +46,6 @@ class TeamSupervisor:
         else:
             self._llm = llm_factory.get_model(model_type or ModelType.GPT_4O)
 
-    def _build_prompt(
-        self,
-        query: str,
-        available: List[Agent],
-        called: List[str],
-        accumulated_outputs: str = "",
-    ) -> str:
-        team_info = "\n".join(
-            f"- {a.name}: {a.system_prompt[:80]}..."
-            for a in available
-        )
-        called_info = f"\nAlready called: {called}\n" if called else ""
-        context_info = (
-            f"\nPrevious agent outputs:\n{accumulated_outputs}\n"
-            if accumulated_outputs
-            else ""
-        )
-        available_names = [a.name for a in available]
-        enum_hint = f"\nAllowed values for 'next': {available_names + ['END']}\n"
-        return (
-            "You are a team coordinator. Analyze the user's request and select "
-            "the most appropriate agent to handle it.\n\n"
-            f"User request: {query}\n"
-            f"{context_info}"
-            f"{called_info}\n"
-            f"Available agents:\n{team_info}\n"
-            f"{enum_hint}\n"
-            "Rules:\n"
-            "1. Do not call the same agent repeatedly.\n"
-            "2. If the task is complete, set next to 'END'.\n"
-            "3. You must output a JSON object with:\n"
-            "   - next: the agent name to call next, or 'END' if finished\n"
-            "   - reason: why you chose this agent"
-        )
-
     async def run(self, query: str) -> Dict[str, Any]:
         """
         运行 Supervisor 协调流程。
@@ -103,8 +69,10 @@ class TeamSupervisor:
                 logger.info("[Supervisor] 所有 Agent 已调用，结束")
                 break
 
-            # LLM 决策（能看到前面的 Agent 输出，做更合理的调度）
-            prompt = self._build_prompt(query, available, called, accumulated_outputs)
+            # LLM 决策（复用公共 PromptBuilder）
+            prompt = SupervisorPromptBuilder.build(
+                query, available, called, accumulated_outputs
+            )
             messages = [
                 SystemMessage(content=prompt),
             ]
@@ -120,19 +88,11 @@ class TeamSupervisor:
                 logger.info(f"[Supervisor] Agent {decision.next} 已调用过，跳过")
                 break
 
-            # 构建增强 query：把前面 Agent 的输出作为上下文附加
-            if accumulated_outputs:
-                enhanced_query = (
-                    f"Original user request: {query}\n\n"
-                    f"Previous agent outputs:\n{accumulated_outputs}\n\n"
-                    f"Please continue to help with the original request."
-                )
-            else:
-                enhanced_query = query
-
-            # 执行选中的 Agent
+            # 执行选中的 Agent（复用公共 AgentExecutionEngine）
             agent = self.agents[decision.next]
-            output = await agent.run(enhanced_query)
+            output = await AgentExecutionEngine.execute(
+                agent, query, accumulated_outputs
+            )
 
             results.append({
                 "round": round_num + 1,
