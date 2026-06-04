@@ -42,6 +42,7 @@ class SupervisorState(TypedDict):
     called_agents: Annotated[List[str], lambda l, r: l + r]
     round_num: int
     final_output: str
+    history: List[Any]  # 多轮对话历史（BaseMessage 列表）
 
 
 # ---- Nodes ----
@@ -108,9 +109,11 @@ def create_agent_node(agent: Agent):
     async def _node(state: SupervisorState) -> Command[Literal["coordinator"]]:
         logger.info(f"[SupervisorGraph] 执行 agent={agent.name} | round={state["round_num"] + 1}")
 
-        # 复用公共 AgentExecutionEngine
+        # 复用公共 AgentExecutionEngine（注入多轮历史）
         accumulated = AgentExecutionEngine.format_accumulated_outputs(state["outputs"])
-        output = await AgentExecutionEngine.execute(agent, state["query"], accumulated)
+        output = await AgentExecutionEngine.execute(
+            agent, state["query"], accumulated, history=state.get("history")
+        )
 
         return Command(
             update={
@@ -209,7 +212,7 @@ class TeamSupervisorGraph:
             agents, model_type=model_type, llm=llm, max_rounds=max_rounds
         )
 
-    async def run(self, query: str) -> Dict[str, Any]:
+    async def run(self, query: str, history: Optional[list] = None) -> Dict[str, Any]:
         logger.info(f"[SupervisorGraph] 启动 | query={query[:80]}")
         state = {
             "query": query,
@@ -217,6 +220,7 @@ class TeamSupervisorGraph:
             "called_agents": [],
             "round_num": 0,
             "final_output": "",
+            "history": history or [],
         }
         result = await self._graph.ainvoke(state)
         logger.info(

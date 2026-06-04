@@ -16,12 +16,13 @@
 """
 import asyncio
 
-from typing import Dict
+from typing import Dict, Optional
 
 from domains.hk_law.agents import get_hk_law_agent, list_domains
 from domains.hk_law.agents import _DOMAIN_CONFIGS
 from domains.hk_law.system_base import DomainSystem
 from core.llm.model_type import ModelType
+from core.session import SessionStore
 from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -33,7 +34,11 @@ class HKLawSystem(DomainSystem):
     继承 DomainSystem 基类，只保留 domain-specific 配置。
     """
 
-    def __init__(self, model_type: ModelType = ModelType.GPT_4O):
+    def __init__(
+        self,
+        model_type: ModelType = ModelType.GPT_4O,
+        session_store: Optional[SessionStore] = None,
+    ):
         domains = list_domains()
         domain_descriptions = {
             "criminal": "刑事案件、犯罪指控、刑事程序、警方调查、保释、量刑",
@@ -46,6 +51,7 @@ class HKLawSystem(DomainSystem):
             domains=domains,
             domain_descriptions=domain_descriptions,
             model_type=model_type,
+            session_store=session_store,
         )
 
     def _create_agent(self, domain: str):

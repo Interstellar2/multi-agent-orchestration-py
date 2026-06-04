@@ -67,22 +67,32 @@ class IntentClassifier:
         else:
             self._llm = llm_factory.get_model(model_type or ModelType.GPT_4O_MINI)
 
-    async def classify(self, query: str) -> IntentResult:
+    async def classify(
+        self, query: str, history: Optional[str] = None
+    ) -> IntentResult:
         logger.info(f"[意图识别] 开始 | query={query[:80]}")
         intent_list = "\n".join(
             f"- {i}: {self.intent_descriptions.get(i, 'No description')}"
             for i in self.intents
         )
 
+        history_section = ""
+        if history:
+            history_section = f"\n【对话历史（供参考）】\n{history}\n"
+
         system_prompt = (
             "You are an intent recognition assistant. "
             "Analyze the user's input and classify it into one of the available intents.\n\n"
             f"Available intents:\n{intent_list}"
+            f"{history_section}\n"
+            "注意：如果当前问题是对话历史的延续（如省略句、追问），"
+            "请根据上下文推断意图，而不仅仅看当前这句话。"
+            "如果用户明显切换了话题，请识别新的意图。"
         )
 
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=query),
+            HumanMessage(content=f"当前问题：{query}"),
         ]
 
         structured_llm = self._llm.with_structured_output(IntentResult)
@@ -128,13 +138,19 @@ class LegalQueryAnalyzer:
         else:
             self._llm = llm_factory.get_model(model_type or ModelType.GPT_4O_MINI)
 
-    async def analyze(self, query: str) -> LegalQueryAnalysis:
+    async def analyze(
+        self, query: str, history: Optional[str] = None
+    ) -> LegalQueryAnalysis:
         logger.info(f"[语义分析] 开始 | query={query[:80]}")
 
         domain_list = "\n".join(
             f"- {d}: {self.domain_descriptions.get(d, 'No description')}"
             for d in self.domains
         )
+
+        history_section = ""
+        if history:
+            history_section = f"\n【对话历史（供参考）】\n{history}\n"
 
         system_prompt = (
             "你是一名香港法律查询语义分析专家。你的任务是将用户的口语化法律问题解析为结构化信息，"
@@ -149,12 +165,15 @@ class LegalQueryAnalyzer:
             "4. is_cross_domain: 当涉及多个法域时为 true。\n"
             "5. intent: 判断用户核心诉求（法律咨询 / 程序指引 / 权益计算 / 比较分析 / 风险评估 / 其他）。\n\n"
             f"可用法域：\n{domain_list}\n\n"
-            "重要：必须以 LegalQueryAnalysis 的 JSON Schema 返回结果。"
+            f"{history_section}"
+            "重要：如果当前问题是对话历史的延续（如省略句、追问），"
+            "请根据上下文推断法域和意图，而不仅仅看当前这句话。"
+            "必须以 LegalQueryAnalysis 的 JSON Schema 返回结果。"
         )
 
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=query),
+            HumanMessage(content=f"当前问题：{query}"),
         ]
 
         structured_llm = self._llm.with_structured_output(LegalQueryAnalysis)

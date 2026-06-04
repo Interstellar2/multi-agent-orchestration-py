@@ -45,16 +45,23 @@ class HKLawAgent(BaseAgent):
         if self.domain:
             self._retriever = DomainRetriever(domain=self.domain, top_k=top_k)
 
-    async def run(self, query: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+    async def run(
+        self,
+        query: str,
+        context: Optional[Dict[str, Any]] = None,
+        history: Optional[list] = None,
+        **kwargs,
+    ) -> str:
         """
         执行流程：
         1. RAG 检索相关法律条文（优先使用 rewritten_query 做检索）
         2. 将检索结果组装成上下文
-        3. 调用 LLM 生成回答
+        3. 调用 LLM 生成回答（注入多轮历史）
 
         Args:
             query: 用户原始问题
             context: 额外上下文（保留兼容）
+            history: 多轮对话历史（LangChain BaseMessage 列表）
             **kwargs: 子类扩展参数
                 - rewritten_query: 语义改写后的查询，用于 RAG 检索优化
                 - statutes: 涉及的具体法例列表（预留用于 metadata 过滤）
@@ -77,13 +84,15 @@ class HKLawAgent(BaseAgent):
         # 2. 组装上下文
         context_text = self._build_context(retrieved_docs)
 
-        # 3. 调用 LLM（始终使用原始 query 保证回答贴近用户真实意图）
-        messages = [
-            SystemMessage(content=self.system_prompt),
+        # 3. 调用 LLM（注入历史 + 当前 query + RAG 上下文）
+        messages = [SystemMessage(content=self.system_prompt)]
+        if history:
+            messages.extend(history)
+        messages.append(
             HumanMessage(
                 content=f"用户问题：{query}\n\n相关法律条文：\n{context_text}\n\n请根据上述法律条文回答用户问题。"
             ),
-        ]
+        )
         try:
             response = await self._llm.ainvoke(messages)
             output = response.content

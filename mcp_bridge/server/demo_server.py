@@ -13,7 +13,7 @@ MCP Demo Server（金融数据版）
     - filter_by_numeric_value   : 按数值条件筛选
     - find_official_company_name: 公司简称→官方全称模糊匹配
     - query_institution_main_business: 机构主营业务语义检索
-    - calculate                 : 安全数学计算（保留原设计）
+    - calculate                 : 安全数学计算
 
 用法:
     # stdio 模式（供本地 Agent 子进程调用）

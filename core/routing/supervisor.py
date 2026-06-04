@@ -46,7 +46,7 @@ class TeamSupervisor:
         else:
             self._llm = llm_factory.get_model(model_type or ModelType.GPT_4O)
 
-    async def run(self, query: str) -> Dict[str, Any]:
+    async def run(self, query: str, history: Optional[list] = None) -> Dict[str, Any]:
         """
         运行 Supervisor 协调流程。
 
@@ -91,7 +91,7 @@ class TeamSupervisor:
             # 执行选中的 Agent（复用公共 AgentExecutionEngine）
             agent = self.agents[decision.next]
             output = await AgentExecutionEngine.execute(
-                agent, query, accumulated_outputs
+                agent, query, accumulated_outputs, history=history
             )
 
             results.append({

@@ -26,13 +26,25 @@ logger = get_logger(__name__)
 
 
 async def interactive_mode():
-    """交互式法律问答"""
+    """交互式法律问答（支持多轮对话）"""
+    import uuid
+    from core.session import PostgresSessionStore
     from domains.hk_law.main import HKLawSystem
-    system = HKLawSystem()
 
+    # 优先使用 PostgreSQL，连接失败则回退到内存
+    try:
+        store = PostgresSessionStore()
+        system = HKLawSystem(session_store=store)
+        logger.info("[Session] 使用 PostgreSQL 存储")
+    except Exception as e:
+        logger.warning(f"[Session] PostgreSQL 连接失败，回退到内存存储 | {e}")
+        system = HKLawSystem()
+
+    session_id = str(uuid.uuid4())
     logger.info("=" * 60)
     logger.info("香港法律多 Agent 问答系统")
-    logger.info("输入问题开始咨询，输入 'quit' 退出")
+    logger.info("输入问题开始咨询，输入 'quit' 退出，'/new' 开启新对话")
+    logger.info(f"当前会话 ID: {session_id}")
     logger.info("=" * 60)
 
     while True:
@@ -44,8 +56,17 @@ async def interactive_mode():
         if not query or query.lower() in ("quit", "exit", "q"):
             break
 
-        result = await system.ask(query, mode="intent")
-        logger.info(f"\n[法域] {result['domain']} (置信度: {result['confidence']:.2f})")
+        if query == "/new":
+            session_id = str(uuid.uuid4())
+            logger.info(f"[会话] 已开启新对话 | session_id={session_id}")
+            continue
+
+        result = await system.ask(query, mode="intent", session_id=session_id)
+        confidence = result.get("confidence", 0.0)
+        domain = result.get("domain", "unknown")
+        logger.info(f"\n[法域] {domain} (置信度: {confidence:.2f})")
+        if result.get("fastpath"):
+            logger.info("[路由] Fast-Path 法域锁定")
         logger.info(f"[回答]\n{result['output']}\n")
 
 

@@ -24,6 +24,7 @@ async def intent_condition_workflow(
     llm: Optional[BaseChatModel] = None,
     classifier_model: ModelType = None,
     classifier_llm: Optional[BaseChatModel] = None,
+    history: Optional[str] = None,
 ) -> Dict:
     """
     意图识别 + 条件路由。
@@ -33,6 +34,7 @@ async def intent_condition_workflow(
         model_type / llm: 当 agents 为 List[str] 时，用于创建 Agent
         classifier_model: 意图识别专用模型（默认 fallback 到 model_type）
         classifier_llm: 意图识别专用 LLM 实例（优先于 classifier_model）
+        history: 对话历史文本（用于上下文感知意图识别）
     """
     logger.info(f"[Workflow] 启动意图识别+条件路由 | query={query[:80]}")
     agent_instances = resolve_agents(
@@ -52,7 +54,7 @@ async def intent_condition_workflow(
         model_type=classifier_model or model_type,
         llm=classifier_llm,
     )
-    intent_result = await classifier.classify(query)
+    intent_result = await classifier.classify(query, history=history)
 
     # 2. 条件路由
     router = ConditionRouter.from_intent_map(

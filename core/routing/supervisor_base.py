@@ -4,7 +4,7 @@ Team Supervisor 公共逻辑
 提取 supervisor.py 和 supervisor_graph.py 共用的 prompt 构建、agent 执行逻辑，
 消除两个 Supervisor 实现之间的重复代码。
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from core.agents.base import Agent
 from core.utils.logger import get_logger
@@ -91,6 +91,7 @@ class AgentExecutionEngine:
         agent: Agent,
         query: str,
         accumulated_outputs: str = "",
+        history: Optional[list] = None,
     ) -> str:
         """
         执行单个 Agent，自动附加历史上下文。
@@ -99,9 +100,10 @@ class AgentExecutionEngine:
             agent: 要执行的 Agent
             query: 原始用户请求
             accumulated_outputs: 前面所有 Agent 的格式化输出
+            history: 多轮对话历史（用户对话层面）
         """
         enhanced_query = AgentExecutionEngine.build_enhanced_query(
             query, accumulated_outputs
         )
         logger.info(f"[AgentExecutionEngine] 执行 agent={agent.name}")
-        return await agent.run(enhanced_query)
+        return await agent.run(enhanced_query, history=history)

@@ -73,7 +73,13 @@ class Agent(ABC):
 
         self.tools = tools or []
 
-    async def run(self, query: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+    async def run(
+        self,
+        query: str,
+        context: Optional[Dict[str, Any]] = None,
+        history: Optional[list] = None,
+        **kwargs,
+    ) -> str:
         """
         执行 Agent 任务。
         - 无 tools -> 直接调用 LLM
@@ -82,23 +88,29 @@ class Agent(ABC):
         Args:
             query: 用户查询
             context: 额外上下文（保留兼容）
+            history: 多轮对话历史（LangChain BaseMessage 列表）
             **kwargs: 子类可扩展参数（如 rewritten_query, statutes 等）
         """
         if self.tools:
-            return await self._react_run(query, context)
-        return await self._direct_run(query, context)
+            return await self._react_run(query, context, history)
+        return await self._direct_run(query, context, history)
 
     # ------------------------------------------------------------------
     # 直接运行（无工具）
     # ------------------------------------------------------------------
 
-    async def _direct_run(self, query: str, context: Optional[Dict[str, Any]] = None) -> str:
+    async def _direct_run(
+        self,
+        query: str,
+        context: Optional[Dict[str, Any]] = None,
+        history: Optional[list] = None,
+    ) -> str:
         """直接调用 LLM，不使用工具"""
         logger.info(f"[{self.name}] 开始运行 | query={query[:80]}")
-        messages = [
-            SystemMessage(content=self.system_prompt),
-            HumanMessage(content=query),
-        ]
+        messages = [SystemMessage(content=self.system_prompt)]
+        if history:
+            messages.extend(history)
+        messages.append(HumanMessage(content=query))
         try:
             response = await self._llm.ainvoke(messages)
             output = response.content
@@ -112,7 +124,12 @@ class Agent(ABC):
     # ReAct 运行（有工具）
     # ------------------------------------------------------------------
 
-    async def _react_run(self, query: str, context: Optional[Dict[str, Any]] = None) -> str:
+    async def _react_run(
+        self,
+        query: str,
+        context: Optional[Dict[str, Any]] = None,
+        history: Optional[list] = None,
+    ) -> str:
         """
         ReAct 主循环。
         使用 AsyncExitStack 统一管理所有 ToolProvider 的生命周期。
@@ -140,10 +157,10 @@ class Agent(ABC):
                 "If no tool is needed, answer directly."
             )
 
-            messages = [
-                SystemMessage(content=system_text),
-                HumanMessage(content=query),
-            ]
+            messages = [SystemMessage(content=system_text)]
+            if history:
+                messages.extend(history)
+            messages.append(HumanMessage(content=query))
 
             # 3. ReAct 循环
             for round_num in range(self.MAX_TOOL_ROUNDS):
