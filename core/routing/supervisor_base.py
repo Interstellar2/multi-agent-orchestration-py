@@ -4,12 +4,58 @@ Team Supervisor 公共逻辑
 提取 supervisor.py 和 supervisor_graph.py 共用的 prompt 构建、agent 执行逻辑，
 消除两个 Supervisor 实现之间的重复代码。
 """
-from typing import Any, Dict, List, Optional
+import hashlib
+import re
+from collections import deque
+from typing import Any, Deque, Dict, List, Optional
 
 from core.agents.base import Agent
 from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class LoopDetector:
+    """
+    Supervisor 层循环检测器（基于 agent 输出内容的指纹）。
+
+    检测模式：不同 agent 被反复调度，但实质输出内容相同（空转/幻觉性进展）。
+    与 Agent 层的 (tool, input) 指纹检测形成互补。
+    """
+
+    def __init__(self, window_size: int = 3):
+        self._window: Deque[str] = deque(maxlen=window_size)
+        self._window_size = window_size
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        """提取文本指纹前的归一化：去空白、去标点、转小写、取前 200 字符。"""
+        # 只保留中文字符、字母、数字
+        cleaned = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", "", text)
+        return cleaned.lower()[:200]
+
+    @staticmethod
+    def _fingerprint(text: str) -> str:
+        """计算文本的短 hash 指纹。"""
+        normalized = LoopDetector._normalize(text)
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+    def check(self, text: str) -> bool:
+        """
+        将文本指纹加入滑动窗口，并检测是否触发循环。
+
+        Returns:
+            True  -> 检测到循环（窗口中已有 >=2 个相同指纹）
+            False -> 未检测到循环
+        """
+        fp = self._fingerprint(text)
+        triggered = self._window.count(fp) >= self._window_size - 1
+        self._window.append(fp)
+        return triggered
+
+    def reset(self) -> None:
+        """清空滑动窗口。"""
+        self._window.clear()
 
 
 class SupervisorPromptBuilder:

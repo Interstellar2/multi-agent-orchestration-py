@@ -21,9 +21,11 @@ LLM 配置（三选一，优先级从高到低）：
     # 方式三：用默认模型
     agent = CodeAgent()
 """
+import hashlib
 import json
 import re
 from abc import ABC
+from collections import deque
 from contextlib import AsyncExitStack
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -54,8 +56,10 @@ class Agent(ABC):
     system_prompt: str = "You are a helpful assistant."
     model_type: ModelType = ModelType.GPT_4O_MINI
 
-    # ReAct 循环最大工具调用轮数
-    MAX_TOOL_ROUNDS = 3
+    # ReAct 循环最大工具调用轮数（全局硬上限）
+    # 配合 _react_run 中的循环检测（连续 3 步相同 tool+input_hash 即拦截），
+    # 正常多工具任务可有 6 轮空间，死循环在第 3 轮重复时被提前截住。
+    MAX_TOOL_ROUNDS = 6
 
     def __init__(
         self,
@@ -195,7 +199,9 @@ class Agent(ABC):
                 messages.extend(history)
             messages.append(HumanMessage(content=query))
 
-            # 3. ReAct 循环
+            # 3. ReAct 循环（带循环检测：连续 3 步相同 tool+input_hash 即拦截）
+            tool_call_window: deque[str] = deque(maxlen=3)
+
             for round_num in range(self.MAX_TOOL_ROUNDS):
                 logger.info(f"[{self.name}] ReAct round {round_num + 1}/{self.MAX_TOOL_ROUNDS}")
                 response = await self._llm.ainvoke(messages)
@@ -212,6 +218,26 @@ class Agent(ABC):
                 # 执行工具调用：遍历所有 provider，第一个成功即返回
                 tool_name = tool_call.get("tool")
                 tool_args = tool_call.get("arguments", {})
+
+                # --- 循环检测：状态指纹（第三层防御）---
+                arg_str = json.dumps(tool_args, sort_keys=True, ensure_ascii=False)
+                fingerprint = f"{tool_name}:{hashlib.sha256(arg_str.encode()).hexdigest()[:16]}"
+                if tool_call_window.count(fingerprint) >= 2:
+                    logger.warning(f"[{self.name}] ReAct 循环检测触发 | {fingerprint}")
+                    await self._emit("loop_detected", {"agent": self.name, "fingerprint": fingerprint, "round": round_num + 1})
+                    messages.append(
+                        SystemMessage(
+                            content=f"检测到你在重复调用工具 '{tool_name}' 且参数相同，请基于已有信息直接给出最终答案，不要再调用工具。"
+                        )
+                    )
+                    final_response = await self._llm.ainvoke(messages)
+                    output = str(final_response.content) if final_response.content else ""
+                    await self._emit_stream_text(output)
+                    await self._emit("done", {"agent": self.name, "output": output[:500], "loop_detected": True})
+                    return output
+                tool_call_window.append(fingerprint)
+                # --- 循环检测结束 ---
+
                 logger.info(f"[{self.name}] 调用工具 | {tool_name}({tool_args})")
                 await self._emit("tool_call", {"agent": self.name, "tool": tool_name, "arguments": tool_args, "round": round_num + 1})
 

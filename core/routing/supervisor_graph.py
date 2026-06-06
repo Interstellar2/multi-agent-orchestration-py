@@ -23,7 +23,7 @@ from typing_extensions import TypedDict
 from core.agents.base import Agent
 from core.llm.factory import llm_factory
 from core.llm.model_type import ModelType
-from core.routing.supervisor_base import SupervisorPromptBuilder, AgentExecutionEngine
+from core.routing.supervisor_base import SupervisorPromptBuilder, AgentExecutionEngine, LoopDetector
 from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -40,6 +40,7 @@ class SupervisorState(TypedDict):
     query: str
     outputs: Annotated[List[Dict[str, Any]], lambda l, r: l + r]
     called_agents: Annotated[List[str], lambda l, r: l + r]
+    output_fingerprints: Annotated[List[str], lambda l, r: l + r]
     round_num: int
     final_output: str
     history: List[Any]  # 多轮对话历史（BaseMessage 列表）
@@ -123,8 +124,9 @@ def create_agent_node(agent: Agent):
     执行 Agent.run() 后，更新 State 并回到 Coordinator。
 
     支持上下文传递：后调用的 Agent 能看到前面 Agent 的输出结果。
+    新增：Supervisor 层循环检测（输出内容指纹）。
     """
-    async def _node(state: SupervisorState) -> Command[Literal["coordinator"]]:
+    async def _node(state: SupervisorState) -> Command[Literal["coordinator", "END"]]:
         logger.info(f"[SupervisorGraph] 执行 agent={agent.name} | round={state["round_num"] + 1}")
 
         # 复用公共 AgentExecutionEngine（注入多轮历史）
@@ -132,6 +134,32 @@ def create_agent_node(agent: Agent):
         output = await AgentExecutionEngine.execute(
             agent, state["query"], accumulated, history=state.get("history")
         )
+
+        # --- Supervisor 层循环检测（内容指纹）---
+        fp = LoopDetector._fingerprint(output)
+        fingerprints = state.get("output_fingerprints", [])
+        recent = fingerprints[-2:]  # 最近 2 个
+        loop_detected = recent.count(fp) >= 2  # 连续 3 次相同即触发
+
+        if loop_detected:
+            logger.warning(f"[SupervisorGraph] 循环检测触发 | agent={agent.name} 输出实质重复")
+            return Command(
+                update={
+                    "outputs": [
+                        {
+                            "round": state["round_num"] + 1,
+                            "agent": agent.name,
+                            "output": output,
+                            "loop_detected": True,
+                        }
+                    ],
+                    "called_agents": [agent.name],
+                    "output_fingerprints": [fp],
+                    "round_num": state["round_num"] + 1,
+                },
+                goto="END",
+            )
+        # --- 循环检测结束 ---
 
         return Command(
             update={
@@ -143,6 +171,7 @@ def create_agent_node(agent: Agent):
                     }
                 ],
                 "called_agents": [agent.name],
+                "output_fingerprints": [fp],
                 "round_num": state["round_num"] + 1,
             },
             goto="coordinator",
@@ -239,6 +268,7 @@ class TeamSupervisorGraph:
             "query": query,
             "outputs": [],
             "called_agents": [],
+            "output_fingerprints": [],
             "round_num": 0,
             "final_output": "",
             "history": history or [],

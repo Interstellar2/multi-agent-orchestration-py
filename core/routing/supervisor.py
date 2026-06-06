@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from core.agents.base import Agent
 from core.llm.factory import llm_factory
 from core.llm.model_type import ModelType
-from core.routing.supervisor_base import SupervisorPromptBuilder, AgentExecutionEngine
+from core.routing.supervisor_base import SupervisorPromptBuilder, AgentExecutionEngine, LoopDetector
 from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +43,7 @@ class TeamSupervisor:
         self.agent_list = agents
         self.max_rounds = max_rounds
         self.event_callback = event_callback
+        self._loop_detector = LoopDetector(window_size=3)
         if llm is not None:
             self._llm = llm
         else:
@@ -109,6 +110,26 @@ class TeamSupervisor:
             output = await AgentExecutionEngine.execute(
                 agent, query, accumulated_outputs, history=history
             )
+
+            # --- Supervisor 层循环检测（内容指纹）---
+            if self._loop_detector.check(output):
+                logger.warning(f"[Supervisor] 循环检测触发 | agent={agent.name} 输出实质重复")
+                await self._emit("loop_detected", {
+                    "round": round_num + 1,
+                    "agent": agent.name,
+                    "reason": "agent 输出与前面轮次实质相同",
+                })
+                results.append({
+                    "round": round_num + 1,
+                    "agent": agent.name,
+                    "reason": decision.reason,
+                    "output": output,
+                    "loop_detected": True,
+                })
+                called.append(agent.name)
+                accumulated_outputs += f"\n--- {agent.name} ---\n{output}\n"
+                break
+            # --- 循环检测结束 ---
 
             results.append({
                 "round": round_num + 1,
