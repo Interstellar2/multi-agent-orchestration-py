@@ -28,7 +28,7 @@ async def list_sessions(store: SessionStore = Depends(get_session_store)):
 
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session(session_id: str, store: SessionStore = Depends(get_session_store)):
-    """获取单个会话详情。"""
+    """获取单个会话详情（含完整对话记录）。"""
     session = await store.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -36,6 +36,7 @@ async def get_session(session_id: str, store: SessionStore = Depends(get_session
         session_id=session.session_id,
         turn_count=len(session.turns),
         summary=session.summary,
+        turns=[t.model_dump(mode="json") for t in session.turns],
     )
 
 

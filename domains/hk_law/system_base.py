@@ -292,6 +292,18 @@ class DomainSystem(ABC):
         if event_callback is not None:
             self._event_callback = event_callback
 
+        # 收集当前请求的非 chunk events，用于持久化到 metadata
+        request_events: List[Dict[str, Any]] = []
+        original_callback = self._event_callback
+
+        async def _wrapped_callback(evt: Dict[str, Any]) -> None:
+            if evt.get("type") != "chunk":
+                request_events.append(evt)
+            if original_callback is not None:
+                await original_callback(evt)
+
+        self._event_callback = _wrapped_callback
+
         logger.info(
             f"[{self.__class__.__name__}] ask | mode={mode} "
             f"session={session_id or 'N/A'} query={query[:80]}"
@@ -354,6 +366,7 @@ class DomainSystem(ABC):
                     "mode": mode,
                     "confidence": confidence,
                     "fastpath": result.get("fastpath", False),
+                    "events": request_events,
                 },
             )
 

@@ -23,6 +23,7 @@ class SessionResponse(BaseModel):
     session_id: str
     turn_count: int
     summary: Optional[str] = None
+    turns: Optional[list] = None
 
 
 class SessionListResponse(BaseModel):
