@@ -38,6 +38,7 @@ class HKLawSystem(DomainSystem):
         self,
         model_type: ModelType = ModelType.GPT_4O,
         session_store: Optional[SessionStore] = None,
+        event_callback=None,
     ):
         domains = list_domains()
         domain_descriptions = {
@@ -52,6 +53,7 @@ class HKLawSystem(DomainSystem):
             domain_descriptions=domain_descriptions,
             model_type=model_type,
             session_store=session_store,
+            event_callback=event_callback,
         )
 
     def _create_agent(self, domain: str):

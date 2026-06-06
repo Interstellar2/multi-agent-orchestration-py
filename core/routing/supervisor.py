@@ -3,7 +3,7 @@ Team Supervisor 模块（Python 原生循环版）
 参考 agenthub-py team_agent_node，用 LLM 做 Supervisor，
 根据任务动态选择 Agent，支持多轮调用。
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -37,14 +37,24 @@ class TeamSupervisor:
         model_type: ModelType = None,
         llm: Optional[BaseChatModel] = None,
         max_rounds: int = 3,
+        event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ):
         self.agents = {a.name: a for a in agents}
         self.agent_list = agents
         self.max_rounds = max_rounds
+        self.event_callback = event_callback
         if llm is not None:
             self._llm = llm
         else:
             self._llm = llm_factory.get_model(model_type or ModelType.GPT_4O)
+
+    async def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
+        """推送 Supervisor 决策事件。"""
+        if self.event_callback is not None:
+            try:
+                await self.event_callback({"type": event_type, "data": data})
+            except Exception as exc:
+                logger.debug(f"[Supervisor] event_callback 异常（忽略）: {exc}")
 
     async def run(self, query: str, history: Optional[list] = None) -> Dict[str, Any]:
         """
@@ -79,6 +89,12 @@ class TeamSupervisor:
             structured_llm = self._llm.with_structured_output(RouterOutput)
             decision = await structured_llm.ainvoke(messages)
             logger.info(f"[Supervisor] 决策 | round={round_num + 1} next={decision.next} reason={decision.reason[:60]}")
+            await self._emit("thought", {
+                "round": round_num + 1,
+                "next": decision.next,
+                "reason": decision.reason,
+                "available_agents": [a.name for a in available],
+            })
 
             if decision.next == "END" or decision.next not in self.agents:
                 logger.info("[Supervisor] 收到 END 或无效目标，结束")

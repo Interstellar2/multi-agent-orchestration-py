@@ -38,11 +38,13 @@ class DomainSystem(ABC):
         domain_descriptions: Dict[str, str],
         model_type: ModelType = ModelType.GPT_4O,
         session_store: Optional[SessionStore] = None,
+        event_callback=None,
     ):
         self.model_type = model_type
         self.domains = domains
         self._domain_descriptions = domain_descriptions
         self._agents: Dict[str, Any] = {}
+        self._event_callback = event_callback
         self.session_manager = ConversationManager(
             store=session_store or InMemorySessionStore(),
             max_turns=10,
@@ -57,9 +59,12 @@ class DomainSystem(ABC):
         ...
 
     def _get_agent(self, domain: str):
-        """懒加载 Agent 实例"""
+        """懒加载 Agent 实例，并注入当前 event_callback。"""
         if domain not in self._agents:
             self._agents[domain] = self._create_agent(domain)
+        # 确保已存在的 agent 也能收到最新的 callback（支持 API 层复用）
+        if hasattr(self._agents[domain], "event_callback"):
+            self._agents[domain].event_callback = self._event_callback
         return self._agents[domain]
 
     @staticmethod
@@ -99,6 +104,11 @@ class DomainSystem(ABC):
         )
         history_text = self._history_to_text(history)
         intent_result = await classifier.classify(query, history=history_text)
+        await self._emit("intent", {
+            "domain": intent_result.intent,
+            "confidence": intent_result.confidence,
+            "reason": intent_result.reason,
+        })
 
         default_domain = self.domains[0] if self.domains else None
         router = ConditionRouter.from_intent_map(
@@ -142,6 +152,7 @@ class DomainSystem(ABC):
             supervisor_model=self.model_type,
             max_rounds=max_rounds,
             history=history,
+            event_callback=self._event_callback,
         )
         logger.info(
             f"[{self.__class__.__name__}] 模式=supervisor 完成 | "
@@ -172,6 +183,15 @@ class DomainSystem(ABC):
         )
         history_text = self._history_to_text(history)
         analysis = await analyzer.analyze(query, history=history_text)
+        await self._emit("semantic", {
+            "intent": analysis.intent,
+            "jurisdictions": analysis.jurisdictions,
+            "statutes": analysis.statutes,
+            "rewritten_query": analysis.rewritten_query,
+            "is_cross_domain": analysis.is_cross_domain,
+            "confidence": analysis.confidence,
+            "reason": analysis.reason,
+        })
 
         # 单法域：直接路由（最优路径）
         if not analysis.is_cross_domain and len(analysis.jurisdictions) == 1:
@@ -222,6 +242,7 @@ class DomainSystem(ABC):
             supervisor_model=self.model_type,
             max_rounds=max_rounds,
             history=history,
+            event_callback=self._event_callback,
         )
         logger.info(
             f"[{self.__class__.__name__}] 模式=semantic 完成 | routing=supervisor "
@@ -244,11 +265,20 @@ class DomainSystem(ABC):
     # 统一入口（多轮对话核心逻辑）
     # ------------------------------------------------------------------
 
+    async def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
+        """如果设置了 event_callback，则推送事件。"""
+        if self._event_callback is not None:
+            try:
+                await self._event_callback({"type": event_type, "data": data})
+            except Exception as exc:
+                logger.debug(f"[{self.__class__.__name__}] event_callback 异常（忽略）: {exc}")
+
     async def ask(
         self,
         query: str,
         mode: str = "intent",
         session_id: Optional[str] = None,
+        event_callback=None,
     ) -> Dict:
         """
         统一入口（支持多轮对话）。
@@ -257,11 +287,16 @@ class DomainSystem(ABC):
             query: 用户问题
             mode: "intent" / "supervisor" / "semantic"
             session_id: 会话 ID（None 表示单轮 Stateless）
+            event_callback: 可选的事件回调（用于 SSE 推送）
         """
+        if event_callback is not None:
+            self._event_callback = event_callback
+
         logger.info(
             f"[{self.__class__.__name__}] ask | mode={mode} "
             f"session={session_id or 'N/A'} query={query[:80]}"
         )
+        await self._emit("start", {"mode": mode, "query": query[:200], "session_id": session_id})
 
         # 1. 加载历史（如有 session_id）
         history = []
@@ -279,6 +314,7 @@ class DomainSystem(ABC):
         if fast_domain and fast_domain in self.domains:
             # Fast-Path：跳过意图识别，直接命中法域
             logger.info(f"[{self.__class__.__name__}] FastPath 命中 | domain={fast_domain}")
+            await self._emit("fastpath", {"domain": fast_domain})
             agent = self._get_agent(fast_domain)
             output = await agent.run(query, history=history)
             result = {
@@ -299,6 +335,8 @@ class DomainSystem(ABC):
             raise ValueError(
                 f"Unknown mode: {mode}. Use 'intent', 'supervisor' or 'semantic'."
             )
+
+        await self._emit("done", {"mode": mode, "domain": result.get("domain"), "output": result["output"][:500]})
 
         # 4. 保存当前轮到 Session
         if session_id:

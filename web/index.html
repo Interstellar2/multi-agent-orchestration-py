@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>香港法律智能助手</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: #f5f6f8;
+      color: #333;
+      height: 100vh;
+      display: flex;
+    }
+    .sidebar {
+      width: 260px;
+      background: #fff;
+      border-right: 1px solid #e5e7eb;
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .sidebar-header h2 { font-size: 16px; }
+    .btn { padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-sm { padding: 4px 8px; font-size: 12px; }
+    .session-list { flex: 1; overflow-y: auto; padding: 8px; }
+    .session-item {
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .session-item:hover { background: #f3f4f6; }
+    .session-item.active { background: #eff6ff; color: #2563eb; }
+    .session-item span { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .header {
+      padding: 16px 24px;
+      background: #fff;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 { font-size: 18px; }
+    .mode-select { padding: 6px 10px; border-radius: 6px; border: 1px solid #d1d5db; font-size: 13px; }
+    .chat-area { flex: 1; overflow-y: auto; padding: 24px; }
+    .message { max-width: 800px; margin: 0 auto 16px; }
+    .message-user { text-align: right; }
+    .bubble {
+      display: inline-block;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+      max-width: 100%;
+      word-break: break-word;
+    }
+    .bubble-user { background: #2563eb; color: #fff; }
+    .bubble-ai { background: #fff; border: 1px solid #e5e7eb; text-align: left; }
+    .events { margin-top: 8px; }
+    .event-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      margin-right: 6px;
+      margin-bottom: 4px;
+      color: #fff;
+    }
+    .event-start { background: #6b7280; }
+    .event-intent { background: #8b5cf6; }
+    .event-semantic { background: #0ea5e9; }
+    .event-fastpath { background: #10b981; }
+    .event-retrieval { background: #f59e0b; }
+    .event-tool_call { background: #ef4444; }
+    .event-tool_result { background: #f97316; }
+    .event-done { background: #22c55e; }
+    .event-error { background: #dc2626; }
+    .input-area {
+      padding: 16px 24px;
+      background: #fff;
+      border-top: 1px solid #e5e7eb;
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    .input-area textarea {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font-size: 14px;
+      resize: none;
+      height: 48px;
+      max-height: 120px;
+      font-family: inherit;
+    }
+    .input-area textarea:focus { outline: none; border-color: #2563eb; }
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid #e5e7eb;
+      border-top-color: #2563eb;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-left: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .typing-cursor::after {
+      content: '|';
+      animation: blink 1s step-start infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    .thought-box {
+      background: #f9fafb;
+      border-left: 3px solid #d1d5db;
+      padding: 8px 12px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #6b7280;
+      border-radius: 0 6px 6px 0;
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>会话列表</h2>
+      <button class="btn btn-primary btn-sm" onclick="newSession()">+ 新建</button>
+    </div>
+    <div class="session-list" id="sessionList"></div>
+  </aside>
+
+  <main class="main">
+    <div class="header">
+      <h1>香港法律智能助手</h1>
+      <div>
+        <label style="font-size:13px;margin-right:6px;">模式:</label>
+        <select class="mode-select" id="modeSelect">
+          <option value="semantic">语义分析 (推荐)</option>
+          <option value="intent">意图识别</option>
+          <option value="supervisor">多 Agent 协作</option>
+        </select>
+      </div>
+    </div>
+    <div class="chat-area" id="chatArea"></div>
+    <div class="input-area">
+      <textarea id="userInput" placeholder="请输入您的问题..." rows="1"
+        onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
+      <button class="btn btn-primary" onclick="sendMessage()" id="sendBtn">发送</button>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = window.location.origin.includes('localhost') ? 'http://localhost:8000' : '';
+    let currentSessionId = localStorage.getItem('current_session_id') || generateId();
+    let sessions = JSON.parse(localStorage.getItem('sessions') || '[]');
+    let eventSource = null;
+
+    function generateId() {
+      return 'sess-' + Math.random().toString(36).slice(2, 10);
+    }
+
+    function saveSessions() {
+      localStorage.setItem('sessions', JSON.stringify(sessions));
+      localStorage.setItem('current_session_id', currentSessionId);
+    }
+
+    function newSession() {
+      currentSessionId = generateId();
+      if (!sessions.find(s => s.id === currentSessionId)) {
+        sessions.unshift({ id: currentSessionId, name: '新会话 ' + new Date().toLocaleTimeString(), turns: [] });
+      }
+      saveSessions();
+      renderSessionList();
+      document.getElementById('chatArea').innerHTML = '';
+    }
+
+    function renderSessionList() {
+      const list = document.getElementById('sessionList');
+      list.innerHTML = sessions.map(s => `
+        <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" onclick="switchSession('${s.id}')">
+          <span>${s.name}</span>
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteSession('${s.id}')">×</button>
+        </div>
+      `).join('');
+    }
+
+    function switchSession(id) {
+      currentSessionId = id;
+      saveSessions();
+      renderSessionList();
+      const sess = sessions.find(s => s.id === id);
+      const chatArea = document.getElementById('chatArea');
+      chatArea.innerHTML = '';
+      if (sess && sess.turns) {
+        sess.turns.forEach(t => appendMessage(t.role, t.content, t.events || []));
+      }
+    }
+
+    function deleteSession(id) {
+      sessions = sessions.filter(s => s.id !== id);
+      if (currentSessionId === id) {
+        currentSessionId = sessions.length ? sessions[0].id : generateId();
+      }
+      saveSessions();
+      renderSessionList();
+      switchSession(currentSessionId);
+    }
+
+    function appendMessage(role, content, events) {
+      const chatArea = document.getElementById('chatArea');
+      const div = document.createElement('div');
+      div.className = 'message message-' + role;
+      const eventsHtml = (events || []).map(e => {
+        const type = e.type || 'start';
+        let text = type;
+        if (type === 'intent') text = `意图: ${e.data.domain} (${(e.data.confidence*100).toFixed(0)}%)`;
+        if (type === 'semantic') text = `语义: ${e.data.intent}`;
+        if (type === 'fastpath') text = `FastPath: ${e.data.domain}`;
+        if (type === 'retrieval') text = `检索: ${e.data.count} 条`;
+        if (type === 'tool_call') text = `工具: ${e.data.tool}`;
+        if (type === 'tool_result') text = `结果: ${e.data.tool}`;
+        if (type === 'done') text = '完成';
+        if (type === 'error') text = '错误';
+        return `<span class="event-tag event-${type}">${text}</span>`;
+      }).join('');
+
+      div.innerHTML = `
+        <div class="bubble bubble-${role}">
+          <div>${escapeHtml(content)}</div>
+          ${eventsHtml ? `<div class="events">${eventsHtml}</div>` : ''}
+        </div>
+      `;
+      chatArea.appendChild(div);
+      chatArea.scrollTop = chatArea.scrollHeight;
+      return div;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function setLoading(loading) {
+      const btn = document.getElementById('sendBtn');
+      const input = document.getElementById('userInput');
+      btn.disabled = loading;
+      input.disabled = loading;
+      if (loading) {
+        btn.innerHTML = '<span class="spinner"></span>';
+      } else {
+        btn.textContent = '发送';
+      }
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('userInput');
+      const query = input.value.trim();
+      if (!query) return;
+      const mode = document.getElementById('modeSelect').value;
+
+      // 本地保存用户消息
+      const sess = sessions.find(s => s.id === currentSessionId);
+      if (!sess) {
+        sessions.unshift({ id: currentSessionId, name: query.slice(0, 20), turns: [] });
+      }
+      const currentSess = sessions.find(s => s.id === currentSessionId);
+      currentSess.turns.push({ role: 'user', content: query, events: [] });
+      saveSessions();
+      renderSessionList();
+
+      appendMessage('user', query, []);
+      input.value = '';
+      setLoading(true);
+
+      // 创建 AI 消息占位
+      const aiMsgDiv = appendMessage('ai', '<span class="typing-cursor"></span>', []);
+      const aiBubble = aiMsgDiv.querySelector('.bubble-ai');
+      let aiText = '';
+      const events = [];
+
+      // SSE 请求
+      const body = JSON.stringify({ query, mode, session_id: currentSessionId });
+      try {
+        const resp = await fetch(`${API_BASE}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+            const jsonStr = line.slice(5).trim();
+            if (!jsonStr) continue;
+            try {
+              const evt = JSON.parse(jsonStr);
+              events.push(evt);
+              if (evt.type === 'chunk') {
+                aiText += evt.data.text || '';
+                aiBubble.innerHTML = `<div>${escapeHtml(aiText)}<span class="typing-cursor"></span></div><div class="events">${renderEventTags(events)}</div>`;
+              } else if (evt.type === 'done') {
+                // done 事件的 output 可能只是前 500 字摘要，优先保留已流式积累的全文
+                if (!aiText && evt.data.output) aiText = evt.data.output;
+                aiBubble.innerHTML = `<div>${escapeHtml(aiText)}</div><div class="events">${renderEventTags(events)}</div>`;
+              } else if (evt.type === 'error') {
+                aiBubble.innerHTML = `<div style="color:#dc2626">出错: ${escapeHtml(evt.data.error || '')}</div><div class="events">${renderEventTags(events)}</div>`;
+              } else {
+                // 更新事件标签
+                aiBubble.innerHTML = `<div>${escapeHtml(aiText)}<span class="typing-cursor"></span></div><div class="events">${renderEventTags(events)}</div>`;
+              }
+            } catch (e) { console.error('SSE parse error', e, jsonStr); }
+          }
+        }
+
+        // 保存 AI 回复到本地
+        currentSess.turns.push({ role: 'ai', content: aiText, events });
+        saveSessions();
+      } catch (err) {
+        aiBubble.innerHTML = `<div style="color:#dc2626">请求失败: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function renderEventTags(events) {
+      return events.map(e => {
+        const type = e.type || 'start';
+        let text = type;
+        if (type === 'intent') text = `意图: ${e.data.domain}`;
+        if (type === 'semantic') text = `语义: ${e.data.intent}`;
+        if (type === 'fastpath') text = `FastPath`;
+        if (type === 'retrieval') text = `检索 ${e.data.count} 条`;
+        if (type === 'tool_call') text = `工具: ${e.data.tool}`;
+        if (type === 'tool_result') text = `结果: ${e.data.tool}`;
+        if (type === 'done') text = '完成';
+        if (type === 'error') text = '错误';
+        return `<span class="event-tag event-${type}">${text}</span>`;
+      }).join('');
+    }
+
+    // 初始化
+    if (!sessions.find(s => s.id === currentSessionId)) {
+      sessions.unshift({ id: currentSessionId, name: '新会话', turns: [] });
+      saveSessions();
+    }
+    renderSessionList();
+  </script>
+</body>
+</html>

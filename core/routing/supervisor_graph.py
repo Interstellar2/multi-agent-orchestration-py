@@ -11,7 +11,7 @@ Graph 结构：
 
 State 中维护了 called_agents / round_num / outputs，实现防循环和多轮协调。
 """
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Awaitable, Callable, Dict, List, Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -47,13 +47,25 @@ class SupervisorState(TypedDict):
 
 # ---- Nodes ----
 
-def create_coordinator_node(agents: List[Agent], llm: BaseChatModel, max_rounds: int = 3):
+def create_coordinator_node(
+    agents: List[Agent],
+    llm: BaseChatModel,
+    max_rounds: int = 3,
+    event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+):
     """
     创建 Coordinator 节点。
     根据当前 State 决定下一步走向哪个 Agent，或 END。
     """
     agent_names = [a.name for a in agents]
     goto_type = Literal[tuple(agent_names + ["END"])]
+
+    async def _emit(event_type: str, data: Dict[str, Any]) -> None:
+        if event_callback is not None:
+            try:
+                await event_callback({"type": event_type, "data": data})
+            except Exception as exc:
+                logger.debug(f"[SupervisorGraph] event_callback 异常（忽略）: {exc}")
 
     async def _node(state: SupervisorState) -> Command[goto_type]:
         round_num = state["round_num"]
@@ -88,6 +100,12 @@ def create_coordinator_node(agents: List[Agent], llm: BaseChatModel, max_rounds:
             decision.next,
             decision.reason[:60],
         )
+        await _emit("thought", {
+            "round": round_num + 1,
+            "next": decision.next,
+            "reason": decision.reason,
+            "available_agents": [a.name for a in available],
+        })
 
         if decision.next == "END" or decision.next not in agent_names:
             logger.info("[SupervisorGraph] 收到 END 或无效目标，结束")
@@ -150,6 +168,7 @@ def build_supervisor_graph(
     model_type: ModelType = None,
     llm: Optional[BaseChatModel] = None,
     max_rounds: int = 3,
+    event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
 ):
     """
     构建 LangGraph 版本的 Supervisor。
@@ -170,7 +189,7 @@ def build_supervisor_graph(
     builder = StateGraph(SupervisorState)
 
     # 注册 coordinator 节点
-    builder.add_node("coordinator", create_coordinator_node(agents, llm_instance, max_rounds))
+    builder.add_node("coordinator", create_coordinator_node(agents, llm_instance, max_rounds, event_callback))
 
     # 注册每个子 Agent 节点
     for agent in agents:
@@ -205,11 +224,13 @@ class TeamSupervisorGraph:
         model_type: ModelType = None,
         llm: Optional[BaseChatModel] = None,
         max_rounds: int = 3,
+        event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ):
         self.agents = agents
         self.max_rounds = max_rounds
         self._graph = build_supervisor_graph(
-            agents, model_type=model_type, llm=llm, max_rounds=max_rounds
+            agents, model_type=model_type, llm=llm, max_rounds=max_rounds,
+            event_callback=event_callback,
         )
 
     async def run(self, query: str, history: Optional[list] = None) -> Dict[str, Any]:

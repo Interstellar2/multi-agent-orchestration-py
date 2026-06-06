@@ -7,7 +7,7 @@ Session 存储层
 import json
 import os
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import List, Optional
 
 from core.session.models import Session, Turn
 from core.utils.logger import get_logger
@@ -27,6 +27,9 @@ class SessionStore(ABC):
     @abstractmethod
     async def delete(self, session_id: str) -> None: ...
 
+    @abstractmethod
+    async def list_all(self) -> List[Session]: ...
+
 
 class InMemorySessionStore(SessionStore):
     """内存存储，进程退出丢失，适合测试和演示。"""
@@ -42,6 +45,9 @@ class InMemorySessionStore(SessionStore):
 
     async def delete(self, session_id: str) -> None:
         self._data.pop(session_id, None)
+
+    async def list_all(self) -> List[Session]:
+        return list(self._data.values())
 
 
 class FileSessionStore(SessionStore):
@@ -82,6 +88,17 @@ class FileSessionStore(SessionStore):
         path = self._path(session_id)
         if os.path.exists(path):
             os.remove(path)
+
+    async def list_all(self) -> List[Session]:
+        sessions = []
+        for fname in os.listdir(self.base_dir):
+            if not fname.endswith(".json"):
+                continue
+            session_id = fname[:-5]
+            session = await self.get(session_id)
+            if session:
+                sessions.append(session)
+        return sessions
 
 
 class PostgresSessionStore(SessionStore):
@@ -191,3 +208,37 @@ class PostgresSessionStore(SessionStore):
                 delete(SessionORM).where(SessionORM.session_id == session_id)
             )
             await db.commit()
+
+    async def list_all(self) -> List[Session]:
+        from core.session.db import SessionORM, TurnORM
+        from sqlalchemy import select
+
+        async with self._session() as db:
+            db_sessions = await db.scalars(select(SessionORM))
+            result = []
+            for db_sess in db_sessions:
+                turn_rows = await db.scalars(
+                    select(TurnORM)
+                    .where(TurnORM.session_id == db_sess.session_id)
+                    .order_by(TurnORM.created_at)
+                )
+                turns = [
+                    Turn(
+                        turn_id=r.turn_id,
+                        role=r.role,
+                        content=r.content,
+                        metadata=r.metadata_ or {},
+                        created_at=r.created_at,
+                    )
+                    for r in turn_rows
+                ]
+                result.append(
+                    Session(
+                        session_id=db_sess.session_id,
+                        created_at=db_sess.created_at,
+                        updated_at=db_sess.updated_at,
+                        turns=turns,
+                        summary=db_sess.summary or "",
+                    )
+                )
+            return result

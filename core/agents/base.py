@@ -25,7 +25,7 @@ import json
 import re
 from abc import ABC
 from contextlib import AsyncExitStack
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -62,6 +62,7 @@ class Agent(ABC):
         model_type: Optional[ModelType] = None,
         llm: Optional[BaseChatModel] = None,
         tools: Optional[List[ToolProvider]] = None,
+        event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ):
         if llm is not None:
             self._llm = llm
@@ -72,6 +73,7 @@ class Agent(ABC):
             self._llm = llm_factory.get_model(mt)
 
         self.tools = tools or []
+        self.event_callback = event_callback
 
     async def run(
         self,
@@ -96,6 +98,29 @@ class Agent(ABC):
         return await self._direct_run(query, context, history)
 
     # ------------------------------------------------------------------
+    # 事件推送（SSE 支持）
+    # ------------------------------------------------------------------
+
+    async def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
+        """如果设置了 event_callback，则推送事件。"""
+        if self.event_callback is not None:
+            try:
+                await self.event_callback({"type": event_type, "data": data})
+            except Exception as exc:
+                logger.debug(f"[{self.name}] event_callback 异常（忽略）: {exc}")
+
+    async def _emit_stream_text(self, text: str, chunk_size: int = 4) -> None:
+        """
+        将一段完整文本模拟为流式 chunk 逐段 emit。
+        用于 ReAct 最终回答等已经获取完整文本、但仍需前端逐字显示的场景。
+        chunk_size: 每段字符数（默认 4，兼顾平滑度和事件频率）。
+        """
+        if not text or self.event_callback is None:
+            return
+        for i in range(0, len(text), chunk_size):
+            await self._emit("chunk", {"agent": self.name, "text": text[i:i + chunk_size]})
+
+    # ------------------------------------------------------------------
     # 直接运行（无工具）
     # ------------------------------------------------------------------
 
@@ -105,19 +130,26 @@ class Agent(ABC):
         context: Optional[Dict[str, Any]] = None,
         history: Optional[list] = None,
     ) -> str:
-        """直接调用 LLM，不使用工具"""
-        logger.info(f"[{self.name}] 开始运行 | query={query[:80]}")
+        """直接调用 LLM（流式输出），逐段推送 chunk 事件。"""
+        logger.info(f"[{self.name}] 开始流式运行 | query={query[:80]}")
+        await self._emit("start", {"agent": self.name, "query": query[:200]})
         messages = [SystemMessage(content=self.system_prompt)]
         if history:
             messages.extend(history)
         messages.append(HumanMessage(content=query))
         try:
-            response = await self._llm.ainvoke(messages)
-            output = response.content
-            logger.info(f"[{self.name}] 运行完成 | output_len={len(output)}")
-            return output
+            full_text = ""
+            async for chunk in self._llm.astream(messages):
+                text = chunk.content or ""
+                full_text += text
+                if text:
+                    await self._emit("chunk", {"agent": self.name, "text": text})
+            logger.info(f"[{self.name}] 流式运行完成 | output_len={len(full_text)}")
+            await self._emit("done", {"agent": self.name, "output": full_text[:500]})
+            return full_text
         except Exception as e:
-            logger.error(f"[{self.name}] 运行失败 | error={e}")
+            logger.error(f"[{self.name}] 流式运行失败 | error={e}")
+            await self._emit("error", {"agent": self.name, "error": str(e)})
             raise
 
     # ------------------------------------------------------------------
@@ -135,6 +167,7 @@ class Agent(ABC):
         使用 AsyncExitStack 统一管理所有 ToolProvider 的生命周期。
         """
         logger.info(f"[{self.name}] 启动 ReAct | query={query[:80]} | providers={len(self.tools)}")
+        await self._emit("start", {"agent": self.name, "query": query[:200], "mode": "react"})
 
         async with AsyncExitStack() as stack:
             # 1. 进入所有 Provider 的上下文
@@ -171,12 +204,16 @@ class Agent(ABC):
                 tool_call = self._extract_tool_call(content)
                 if tool_call is None:
                     logger.info(f"[{self.name}] ReAct 完成（无需更多工具）| rounds={round_num + 1}")
+                    # 将已生成的完整回答模拟为逐字流式输出
+                    await self._emit_stream_text(content)
+                    await self._emit("done", {"agent": self.name, "output": content[:500]})
                     return content
 
                 # 执行工具调用：遍历所有 provider，第一个成功即返回
                 tool_name = tool_call.get("tool")
                 tool_args = tool_call.get("arguments", {})
                 logger.info(f"[{self.name}] 调用工具 | {tool_name}({tool_args})")
+                await self._emit("tool_call", {"agent": self.name, "tool": tool_name, "arguments": tool_args, "round": round_num + 1})
 
                 result_text = ""
                 invoked = False
@@ -194,6 +231,8 @@ class Agent(ABC):
                     result_text = f"Tool execution error: No provider could invoke '{tool_name}'"
                     logger.error(f"[{self.name}] 无可用 Provider 能调用工具 | {tool_name}")
 
+                await self._emit("tool_result", {"agent": self.name, "tool": tool_name, "result": result_text[:1000], "round": round_num + 1})
+
                 # 将工具调用与结果追加到对话历史
                 messages.append(HumanMessage(content=content))
                 messages.append(
@@ -206,7 +245,10 @@ class Agent(ABC):
             # 达到最大轮数，强制总结
             logger.warning(f"[{self.name}] ReAct 达到最大轮数，强制总结")
             final_response = await self._llm.ainvoke(messages)
-            return str(final_response.content) if final_response.content else ""
+            output = str(final_response.content) if final_response.content else ""
+            await self._emit_stream_text(output)
+            await self._emit("done", {"agent": self.name, "output": output[:500]})
+            return output
 
     # ------------------------------------------------------------------
     # 工具描述格式化（上提为静态方法）

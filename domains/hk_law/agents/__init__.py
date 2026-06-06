@@ -112,6 +112,7 @@ def get_hk_law_agent(
     model_type: ModelType = None,
     llm: Optional[BaseChatModel] = None,
     top_k: int = 5,
+    event_callback=None,
 ) -> HKLawAgent:
     """通过名称实例化香港法律 Agent"""
     agent_cls = _AGENT_REGISTRY.get(name)
@@ -120,7 +121,7 @@ def get_hk_law_agent(
             f"Unknown HK law agent: {name}. "
             f"Available: {list(_AGENT_REGISTRY.keys())}"
         )
-    return agent_cls(model_type=model_type, llm=llm, top_k=top_k)
+    return agent_cls(model_type=model_type, llm=llm, top_k=top_k, event_callback=event_callback)
 
 
 def list_domains() -> List[str]:

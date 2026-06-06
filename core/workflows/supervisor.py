@@ -24,6 +24,7 @@ async def team_supervisor_workflow(
     supervisor_llm: Optional[BaseChatModel] = None,
     max_rounds: int = 3,
     history: Optional[list] = None,
+    event_callback=None,
 ) -> Dict:
     """
     Team Supervisor（Python 原生循环版）。
@@ -32,6 +33,7 @@ async def team_supervisor_workflow(
         supervisor_model: Coordinator 决策专用模型（默认 fallback 到 model_type）
         supervisor_llm: Coordinator 专用 LLM 实例（优先于 supervisor_model）
         history: 多轮对话历史（BaseMessage 列表）
+        event_callback: 事件回调（用于 SSE 推送）
     """
     logger.info(f"[Workflow] 启动 Team Supervisor | query={query[:80]}")
     agent_instances = resolve_agents(
@@ -44,6 +46,7 @@ async def team_supervisor_workflow(
         model_type=supervisor_model or model_type,
         llm=supervisor_llm,
         max_rounds=max_rounds,
+        event_callback=event_callback,
     )
     result = await supervisor.run(query, history=history)
     logger.info(f"[Workflow] 完成 Team Supervisor | 调用 history={result.get('called_agents')}")
@@ -59,6 +62,7 @@ async def team_supervisor_graph_workflow(
     supervisor_llm: Optional[BaseChatModel] = None,
     max_rounds: int = 3,
     history: Optional[list] = None,
+    event_callback=None,
 ) -> Dict:
     """
     Team Supervisor（LangGraph 版本）。
@@ -66,6 +70,7 @@ async def team_supervisor_graph_workflow(
 
     参数:
         history: 多轮对话历史（BaseMessage 列表）
+        event_callback: 事件回调（用于 SSE 推送）
     """
     logger.info(f"[Workflow] 启动 Team Supervisor (LangGraph) | query={query[:80]}")
     agent_instances = resolve_agents(
@@ -78,6 +83,7 @@ async def team_supervisor_graph_workflow(
         model_type=supervisor_model or model_type,
         llm=supervisor_llm,
         max_rounds=max_rounds,
+        event_callback=event_callback,
     )
     result = await supervisor.run(query, history=history)
     logger.info(f"[Workflow] 完成 Team Supervisor (LangGraph) | 调用 history={result.get('called_agents')}")

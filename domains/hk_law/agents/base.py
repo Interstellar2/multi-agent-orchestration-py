@@ -40,8 +40,9 @@ class HKLawAgent(BaseAgent):
         model_type: ModelType = None,
         llm: Optional[BaseChatModel] = None,
         top_k: int = 5,
+        event_callback=None,
     ):
-        super().__init__(model_type=model_type, llm=llm)
+        super().__init__(model_type=model_type, llm=llm, event_callback=event_callback)
         if self.domain:
             self._retriever = DomainRetriever(domain=self.domain, top_k=top_k)
 
@@ -70,6 +71,7 @@ class HKLawAgent(BaseAgent):
         statutes = kwargs.get("statutes")
         search_query = rewritten_query or query
         logger.info(f"[{self.name}] 开始 | query={query[:80]} | search_query={search_query[:80]}")
+        await self._emit("start", {"agent": self.name, "query": query[:200]})
 
         # 1. 检索（使用改写后的查询以获得更好的召回）
         retrieved_docs: list[Document] = []
@@ -77,9 +79,15 @@ class HKLawAgent(BaseAgent):
             try:
                 retrieved_docs = self._retriever.search(search_query)
                 logger.info(f"[{self.name}] RAG 检索完成 | 召回 {len(retrieved_docs)} 条文档")
+                sources = [doc.metadata.get("source", "unknown") for doc in retrieved_docs]
+                await self._emit("retrieval", {"agent": self.name, "count": len(retrieved_docs), "sources": sources})
             except Exception as e:
                 # ES 未启动、索引不存在、或网络问题
                 logger.warning(f"[{self.name}] RAG 检索失败（将不使用检索上下文）: {e}")
+                await self._emit("retrieval", {"agent": self.name, "count": 0, "error": str(e)})
+
+        if statutes:
+            await self._emit("statutes", {"agent": self.name, "statutes": statutes})
 
         # 2. 组装上下文
         context_text = self._build_context(retrieved_docs)
@@ -94,12 +102,18 @@ class HKLawAgent(BaseAgent):
             ),
         )
         try:
-            response = await self._llm.ainvoke(messages)
-            output = response.content
-            logger.info(f"[{self.name}] 运行完成 | output_len={len(output)}")
-            return output
+            full_text = ""
+            async for chunk in self._llm.astream(messages):
+                text = chunk.content or ""
+                full_text += text
+                if text:
+                    await self._emit("chunk", {"agent": self.name, "text": text})
+            logger.info(f"[{self.name}] 运行完成 | output_len={len(full_text)}")
+            await self._emit("done", {"agent": self.name, "output": full_text[:500]})
+            return full_text
         except Exception as e:
             logger.error(f"[{self.name}] LLM 调用失败: {e}")
+            await self._emit("error", {"agent": self.name, "error": str(e)})
             raise
 
     def _build_context(self, docs: list[Document]) -> str:
